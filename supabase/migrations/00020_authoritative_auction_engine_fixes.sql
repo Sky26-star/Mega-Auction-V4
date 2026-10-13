@@ -1,0 +1,3 @@
+-- Migration: 00020_authoritative_auction_engine_fixes.sql
+-- DEPRECATED & REPLACED BY 00021_correct_authoritative_auction_engine.sql
+-- Do not apply this file directly. Use 00021_correct_authoritative_auction_engine.sql instead.

@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 150 12% 5%; /* #0B0F0D */
+    --foreground: 80 10% 95%; /* #F3F4F1 */
+
+    --card: 150 10% 9%; /* #141917 */
+    --card-foreground: 80 10% 95%; /* #F3F4F1 */
+
+    --popover: 150 10% 9%;
+    --popover-foreground: 80 10% 95%;
+
+    --primary: 45 68% 47%; /* #C9A227 Gold */
+    --primary-foreground: 150 12% 5%;
+
+    --secondary: 147 8% 10%; /* #181E1A */
+    --secondary-foreground: 80 10% 95%;
+
+    --muted: 147 6% 15%;
+    --muted-foreground: 144 6% 62%; /* #9CA6A0 */
+
+    --accent: 357 58% 45%; /* #B8322E Crimson */
+    --accent-foreground: 80 10% 95%;
+
+    --destructive: 357 58% 45%;
+    --destructive-foreground: 80 10% 95%;
+
+    --border: 144 8% 18%; /* #2A312D */
+    --input: 144 8% 18%;
+    --ring: 45 68% 47%;
+
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-[#2A312D];
+  }
+  body {
+    background-color: #0B0F0D;
+    color: #F3F4F1;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Oswald', 'IBM Plex Sans', sans-serif;
+    letter-spacing: 0.02em;
+  }
+  
+  .font-mono-numbers {
+    font-family: 'IBM Plex Mono', monospace;
+  }
+}
+
+/* High contrast input placeholder accessibility */
+input::placeholder, textarea::placeholder {
+  color: #9CA6A0 !important;
+  opacity: 0.85 !important;
+}
+
+@keyframes float-gentle {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes pulse-live {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.15);
+  }
+}
+
+.animate-float-gentle {
+  animation: float-gentle 5s ease-in-out infinite;
+}
+
+.animate-pulse-live {
+  animation: pulse-live 2s ease-in-out infinite;
+}

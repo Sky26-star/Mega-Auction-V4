@@ -1,0 +1,21 @@
+# Supabase project configuration for Mega Auction
+project_id = "zkrxuowctprncwnymnvg"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54325
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[auth.third_party.clerk]
+enabled = true
+domain = "helped-hound-8084.clerk.accounts.dev"

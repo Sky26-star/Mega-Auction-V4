@@ -1,0 +1,157 @@
+/* ==========================================================================
+   MEGA AUCTION TEAM DASHBOARD — PURE FLEXBOX LAYOUT DEMO STYLESHEET
+   ========================================================================== 
+   This CSS file is structured specifically for learning and inspecting 
+   CSS Flexbox concepts without CSS Grid or absolute positioning.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. NAVBAR FLEXBOX LAYOUT
+   -------------------------------------------------------------------------- */
+
+/* Flex container: lays out logo and navigation items in a horizontal row */
+.flex-nav-container {
+  display: flex; /* Creates a Flexbox formatting context */
+  justify-content: space-between; /* Spreads logo to left and items to right */
+  align-items: center; /* Vertically aligns logo, links, and buttons in center */
+  gap: 1.5rem; /* Adds consistent spacing between flex items */
+}
+
+/* Flex item & sub-container: groups navigation links horizontally */
+.flex-nav-links {
+  display: flex; /* Secondary flex container inside navbar */
+  align-items: center; /* Vertically aligns all link items */
+  gap: 1.25rem; /* Spacing between navigation links */
+}
+
+/* --------------------------------------------------------------------------
+   2. HERO HEADER FLEXBOX LAYOUT
+   -------------------------------------------------------------------------- */
+
+/* Flex container: stacks hero title, subtitle, and badge vertically */
+.flex-hero-container {
+  display: flex; /* Creates flex container */
+  flex-direction: column; /* Stacks flex items vertically from top to bottom */
+  align-items: flex-start; /* Aligns hero items to the left (start of cross axis) */
+  gap: 0.75rem; /* Vertical spacing between title, subtitle, and status badge */
+}
+
+/* Flex sub-container: aligns status dot and status badge text in a row */
+.flex-badge-container {
+  display: flex; /* Inner flex container for status badge */
+  align-items: center; /* Vertically centers dot icon with text */
+  gap: 0.5rem; /* Horizontal spacing between indicator dot and label */
+}
+
+/* --------------------------------------------------------------------------
+   3. TEAM CARDS CONTAINER & FLEX WRAP LAYOUT
+   -------------------------------------------------------------------------- */
+
+/* Main cards container: arranges team cards in a flexible wrapping row */
+.flex-card-wrapper {
+  display: flex; /* Primary flex container for team cards */
+  flex-wrap: wrap; /* Allows team cards to automatically wrap to next row */
+  gap: 1.5rem; /* Gap between cards both horizontally and vertically */
+  justify-content: flex-start; /* Aligns cards starting from left side */
+}
+
+/* Flex item (Team Card): defines flexible width and sizing rules */
+.flex-team-card {
+  flex-grow: 1; /* Allows card to expand and fill available extra space */
+  flex-shrink: 1; /* Allows card to shrink when screen space becomes limited */
+  flex-basis: 340px; /* Target ideal starting width for each card before wrapping */
+  
+  /* Internal Flex container inside each card */
+  display: flex; /* Card acts as a flex container for its own content */
+  flex-direction: column; /* Arranges card header, stats, and footer vertically */
+  justify-content: space-between; /* Pushes footer button to bottom of card */
+  gap: 1.25rem; /* Spacing between card internal sections */
+}
+
+/* --------------------------------------------------------------------------
+   4. CARD INTERNAL SECTIONS (HEADER & STATS)
+   -------------------------------------------------------------------------- */
+
+/* Card top section: places team badge and team short code side-by-side */
+.flex-card-header {
+  display: flex; /* Flex container for card header */
+  justify-content: space-between; /* Pushes team logo/name left and code right */
+  align-items: center; /* Vertically centers header items */
+  gap: 0.75rem; /* Space between logo group and short code badge */
+}
+
+/* Grouping logo and team title together in a horizontal row */
+.flex-card-title-group {
+  display: flex; /* Sub-container inside card header */
+  align-items: center; /* Vertically aligns logo circle with team text */
+  gap: 0.75rem; /* Space between logo avatar and team name text */
+}
+
+/* Card stats section: displays data items in stacked or row-based flex layouts */
+.flex-card-stats {
+  display: flex; /* Flex container for key statistics */
+  flex-direction: column; /* Stacks statistical data rows vertically */
+  gap: 0.65rem; /* Spacing between purse, players bought, and remaining rows */
+}
+
+/* Individual stat row: aligns label to left and numeric value to right */
+.flex-stat-row {
+  display: flex; /* Flex container for a single statistic line */
+  justify-content: space-between; /* Pushes stat label to left and value to right */
+  align-items: center; /* Vertically aligns label and number */
+  gap: 0.5rem; /* Space between label and numeric data */
+}
+
+/* --------------------------------------------------------------------------
+   5. BOTTOM ACTION BAR FLEXBOX LAYOUT
+   -------------------------------------------------------------------------- */
+
+/* Bottom section container: aligns action buttons horizontally */
+.flex-action-bar {
+  display: flex; /* Flex container for primary action bar */
+  justify-content: space-between; /* Separates start auction button and view all button */
+  align-items: center; /* Vertically centers action elements */
+  flex-wrap: wrap; /* Allows buttons to stack cleanly on small mobile screens */
+  gap: 1rem; /* Spacing between action buttons */
+}
+
+/* Button group helper: groups multiple buttons in a row if needed */
+.flex-button-group {
+  display: flex; /* Sub-container for action buttons */
+  align-items: center; /* Vertically aligns buttons */
+  gap: 0.75rem; /* Gap between buttons */
+}
+
+/* --------------------------------------------------------------------------
+   6. RESPONSIVE FLEXBOX MEDIA QUERIES
+   -------------------------------------------------------------------------- */
+
+/* Mobile viewport adjustments */
+@media (max-width: 640px) {
+  .flex-nav-container {
+    flex-direction: column; /* Stacks navbar logo and items on small screens */
+    align-items: flex-start; /* Left-aligns navigation items */
+    gap: 1rem;
+  }
+
+  .flex-nav-links {
+    flex-wrap: wrap; /* Allows nav links to wrap on narrow mobile devices */
+    gap: 0.75rem;
+  }
+
+  .flex-[#team-card] {
+    flex-basis: 100%; /* Forces cards to take full width on mobile screens */
+  }
+
+  .flex-action-bar {
+    flex-direction: column; /* Stacks action buttons vertically on mobile */
+    align-items: stretch; /* Stretches buttons to full width */
+  }
+
+  .flex-action-bar button,
+  .flex-action-bar a {
+    width: 100%; /* Full width action buttons on mobile */
+    text-align: center;
+    justify-content: center;
+  }
+}

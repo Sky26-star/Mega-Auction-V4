@@ -1,0 +1,173 @@
+# Dependencies
+/node_modules
+/.pnpm-store
+
+# Next.js build output
+/.next/
+/out/
+
+# Production build
+/build
+
+# Environment files
+.env*.local
+.env
+
+# Supabase local environment runtime files
+/supabase/.temp
+/supabase/.branches
+
+# IDE and OS metadata
+.DS_Store
+*.pem
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea
+
+# Testing & Coverage
+/coverage
+/playwright-report
+/test-results
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Local development / generated files
+/scratch/
+*.tsbuildinfo
+
+# Unused/generated project assets
+/openapi.json
+/public/images/cricket_auction_trophy_3d.png
+/public/images/ipl_trophy_3d.png
+
+# Local credentials — never publish
+.env*
+!.env.example
+
+# Database backups and environment-specific schema snapshots
+/supabase/*backup*.sql
+/supabase/production_data_backup.sql
+/supabase/remote_schema_baseline_*.sql
+/supabase/remote_schema_current.sql
+
+# Local logs, diagnostics and investigation artifacts
+*.log
+*.jsonl
+/cleanup_output.txt
+/diagnostic_output.json
+/proofs.jsonl
+/recover_server_bot.json
+/scratch_diagnostic.sql
+
+# Local credentials — never publish
+.env*
+!.env.example
+
+# Database backups and environment-specific schema snapshots
+/supabase/*backup*.sql
+/supabase/production_data_backup.sql
+/supabase/remote_schema_baseline_*.sql
+/supabase/remote_schema_current.sql
+
+# Local logs, diagnostics and investigation artifacts
+*.log
+*.jsonl
+/cleanup_output.txt
+/diagnostic_output.json
+/proofs.jsonl
+/recover_server_bot.json
+/scratch_diagnostic.sql
+
+# Local AI-agent state and browser inspection artifacts
+/.agent/
+/.serena/
+/.playwright-mcp/
+/.planning/
+
+# Local investigation reports and diagnostic outputs
+/bot-investigation*.md
+/bot_intelligence_implementation_report.md
+/FULL-PHASE1-8-ARTIFACT-AUDIT.txt
+/FULL-PHASE1-8-SOURCE-AUDIT.txt
+/phase_14_*.md
+/COMPLETE_PLAYER_RATINGS_202.md
+/FINAL_PLAYER_RATINGS.md
+/rating-all-players.md
+/artifacts/
+
+# Local database investigation files (keep numbered migrations)
+ /check.sql
+ /diff_output.sql
+ /diff_output_utf8.sql
+ /scratch_diagnostic.sql
+ /db_updates.txt
+ /mini_functions_dump.txt
+ /target_ids.txt
+ /policies.json
+ /round7_*.sql
+ /round8_*.js
+ /round9_*.js
+ /test_jwt.js
+ /get_error.js
+ /smoke-snapshot.js
+ /cleanup-tests.js
+ /drift-check.js
+
+# Local backups and obsolete copies
+/src/hooks/*.bak
+/src/hooks/*_old.ts.txt
+/supabase/migrations/*.bak
+/supabase/migrations/NEW_FILENAME_HERE.sql
+/supabase/snippets/Untitled query 332.sql
+
+# Local database dump and temporary diagnostic tests
+/mini_functions_dump.txt
+/src/test/e2e/phase13a-integration.s9-backup.spec.ts
+/src/test/e2e/phase13a-s9-diagnostic.spec.ts
+
+# Local SQL investigation scripts and generated diffs
+/check.sql
+/diff_output.sql
+/diff_output_utf8.sql
+/round7_step3.sql
+/round7_step4.sql
+/round7_step5.sql
+/round7_trigger_test.sql
+/round8_setup.sql
+/scratch_diagnostic.sql
+
+# Database dump utility — review before publishing
+/scripts/dump_mini_functions.js
+
+# Local authentication-bypass investigations and DB verification scripts
+/round8_bypass_a2.js
+/round8_bypass_test.js
+/round8_regression_test.js
+/round9_delete_bypass_test.js
+/scripts/verify_auction_lifecycle.js
+/scripts/verify_room_collision_fix.js
+/supabase/migrations/20261010230917_fix_mini_confirm_clerk_identity.sql
+/tsconfig.tsbuildinfo
+
+# Local investigation artifacts - do not publish
+/policies.json
+/target_ids.txt
+/test_jwt.js
+/smoke-snapshot.js
+/drift-check.js
+/get_error.js
+/cleanup-tests.js
+/db_updates.txt
+
+# Old source snapshots and empty migration artifacts
+/src/hooks/useV3AuctionState.ts.bak
+/src/hooks/useV3AuctionState_old.ts.txt
+/supabase/migrations/20261010230917_fix_mini_confirm_clerk_identity.sql
+/supabase/CONSOLIDATED_REMOTE_MIGRATION.sql

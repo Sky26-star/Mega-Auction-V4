@@ -1,0 +1,164 @@
+-- Migration: 00058_fix_authoritative_state_and_timer.sql
+-- Description: Fix get_authoritative_auction_state to correctly return get_ready_expires_at,
+-- complete player stats, and maintain proper security definer privileges.
+
+CREATE OR REPLACE FUNCTION public.get_authoritative_auction_state(p_room_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_auction public.auctions%ROWTYPE;
+  v_active_lot public.auction_lots%ROWTYPE;
+  v_current_player public.players%ROWTYPE;
+  v_bid_count INT := 0;
+  v_effective_bid INT := 0;
+  v_timer_sec INT := 15;
+  v_now TIMESTAMPTZ := clock_timestamp();
+  v_timer_expires_iso TEXT := NULL;
+  v_is_get_ready BOOLEAN := false;
+  v_get_ready_expires_iso TEXT := NULL;
+  v_teams JSONB := '[]'::jsonb;
+  v_queue JSONB := '[]'::jsonb;
+BEGIN
+  -- 1. Fetch room's active auction, prioritizing IN_PROGRESS/PAUSED/MINI_AUCTION over LOBBY/COMPLETED
+  SELECT a.* INTO v_auction
+  FROM public.auctions a
+  WHERE a.room_id = p_room_id
+  ORDER BY 
+    CASE a.status 
+      WHEN 'IN_PROGRESS' THEN 1 
+      WHEN 'PAUSED' THEN 2 
+      WHEN 'MINI_AUCTION' THEN 3
+      WHEN 'COMPLETED' THEN 4
+      ELSE 5 
+    END ASC,
+    a.created_at DESC
+  LIMIT 1;
+
+  IF v_auction.id IS NULL THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'status', 'NO_AUCTION_FOUND',
+      'message', 'No auction exists for this room'
+    );
+  END IF;
+
+  -- 2. Safely fetch current lot.
+  SELECT al.* INTO v_active_lot
+  FROM public.auction_lots al
+  WHERE (v_auction.current_lot_id IS NOT NULL AND al.id = v_auction.current_lot_id)
+     OR (v_auction.current_lot_id IS NULL AND al.auction_id = v_auction.id AND al.lot_index = v_auction.current_lot_index)
+  LIMIT 1;
+
+  -- 3. Safely fetch current player.
+  SELECT p.* INTO v_current_player
+  FROM public.players p
+  WHERE v_active_lot.id IS NOT NULL AND p.id = v_active_lot.player_id
+  LIMIT 1;
+
+  -- 4. Build timer state if active lot exists.
+  IF v_active_lot.id IS NOT NULL THEN
+    v_timer_sec := COALESCE(v_active_lot.timer_duration_seconds, 15);
+    
+    -- Authoritative BIDDING timer
+    IF v_active_lot.timer_expires_at IS NOT NULL THEN
+      v_timer_expires_iso := to_char(v_active_lot.timer_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+    END IF;
+
+    -- Authoritative GET_READY timer
+    IF v_active_lot.status = 'GET_READY' AND v_active_lot.get_ready_expires_at IS NOT NULL THEN
+      v_is_get_ready := (v_active_lot.get_ready_expires_at > v_now);
+      v_get_ready_expires_iso := to_char(
+        v_active_lot.get_ready_expires_at AT TIME ZONE 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+      );
+    END IF;
+
+    SELECT COUNT(*) INTO v_bid_count
+    FROM public.bids b
+    WHERE b.lot_id = v_active_lot.id AND b.is_valid = true;
+
+    -- Effective current bid
+    IF v_bid_count > 0 AND v_active_lot.current_bid > 0 THEN
+      v_effective_bid := v_active_lot.current_bid;
+    ELSE
+      v_effective_bid := COALESCE(v_active_lot.base_price, v_current_player.base_price, 200);
+    END IF;
+  ELSE
+    v_effective_bid := 0;
+  END IF;
+
+  -- 5. Fetch teams with proper squad counts
+  SELECT jsonb_agg(
+    jsonb_build_object(
+      'id', t.id,
+      'name', t.name,
+      'shortName', t.short_name,
+      'color', t.color,
+      'purse', t.purse,
+      'initial_purse', t.initial_purse,
+      'playersBought', COALESCE(
+        (SELECT COUNT(*) FROM public.squad_players sp WHERE sp.team_id = t.id), 0
+      ),
+      'is_bot', t.is_bot
+    ) ORDER BY t.name ASC
+  ) INTO v_teams
+  FROM public.teams t
+  WHERE t.auction_id = v_auction.id;
+
+  -- 6. Return comprehensive authoritative state with complete player stats
+  RETURN jsonb_build_object(
+    'success', true,
+    'status', v_auction.status,
+    'auctionId', v_auction.id,
+    'roomId', v_auction.room_id,
+    'lotId', v_active_lot.id,
+    'lotIndex', v_auction.current_lot_index,
+    'isUnsoldRound', v_auction.is_unsold_round,
+    'playerId', v_active_lot.player_id,
+    'currentBid', v_effective_bid,
+    'highestBidderId', v_active_lot.highest_bidder_team_id,
+    'winningTeamId', v_active_lot.winning_team_id,
+    'winningBid', v_active_lot.winning_bid,
+    'bidCount', v_bid_count,
+    'timerDurationSeconds', v_timer_sec,
+    'timerExpiresAt', v_timer_expires_iso,
+    'isGetReady', v_is_get_ready,
+    'getReadyExpiresAt', v_get_ready_expires_iso,
+    'lotStatus', COALESCE(v_active_lot.status, 'PENDING'),
+    'teams', COALESCE(v_teams, '[]'::jsonb),
+    'queue', COALESCE(v_queue, '[]'::jsonb),
+    'player_stats', CASE WHEN v_current_player.id IS NOT NULL THEN jsonb_build_object(
+      'name', v_current_player.name,
+      'age', v_current_player.age,
+      'category', v_current_player.category,
+      'role', v_current_player.role,
+      'country', v_current_player.country,
+      'batting_hand', v_current_player.batting_hand,
+      'base_price', v_current_player.base_price,
+      'is_overseas', v_current_player.is_overseas,
+      'image_url', v_current_player.image_url,
+      'matches', v_current_player.matches,
+      'runs', v_current_player.runs,
+      'wickets', v_current_player.wickets,
+      'batting_average', v_current_player.batting_average,
+      'strike_rate', v_current_player.strike_rate,
+      'economy_rate', v_current_player.economy_rate,
+      'bowling_average', v_current_player.bowling_average,
+      'bowling_strike_rate', v_current_player.bowling_strike_rate,
+      'best_bowling', v_current_player.best_bowling,
+      'highest_score', v_current_player.highest_score,
+      'hundreds', v_current_player.hundreds,
+      'fifties', v_current_player.fifties,
+      'three_wicket_hauls', v_current_player.three_wicket_hauls,
+      'catches', v_current_player.catches,
+      'stumpings', v_current_player.stumpings
+    ) ELSE NULL END
+  );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.get_authoritative_auction_state(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_authoritative_auction_state(uuid) TO authenticated, service_role;

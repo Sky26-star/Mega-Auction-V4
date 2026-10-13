@@ -1,0 +1,104 @@
+# ==============================================================================
+# Mega Auction V3 — Persistent Auction Worker (Fly.io Configuration)
+# ==============================================================================
+#
+# This app runs the background auction worker as a SINGLETON process.
+# It does NOT serve HTTP traffic.
+#
+# DEPLOYMENT INVARIANTS:
+#   - Exactly 1 Machine at steady state.
+#   - No HTTP services or ports.
+#   - No autoscaling.
+#   - Deployment strategy prevents old/new worker overlap.
+#
+# SECRETS (must be set via `fly secrets set` before first deploy):
+#   - NEXT_PUBLIC_SUPABASE_URL
+#   - NEXT_PUBLIC_SUPABASE_ANON_KEY
+#   - SUPABASE_SERVICE_ROLE_KEY
+#
+# SINGLETON ENFORCEMENT:
+#   After first deploy, run:
+#     fly scale count 1 --yes
+#   to explicitly lock the Machine count to 1.
+#
+# ==============================================================================
+
+# App name — must be created with `fly apps create <name>` before deploy
+app = "mega-auction-worker"
+
+# PRODUCTION REGION — REQUIRED BEFORE DEPLOYMENT
+# Replace this placeholder with the actual Fly.io region code that is
+# co-located with the production Supabase project.
+# Example: "bom" for Mumbai, "sin" for Singapore, "iad" for Ashburn.
+# DO NOT deploy until this is set to the correct region.
+primary_region = "sin"
+
+# ------------------------------------------------------------------------------
+# Shutdown behavior
+# ------------------------------------------------------------------------------
+# Worker handles SIGTERM for graceful shutdown (awaits current tick completion).
+# Fly.io default kill_signal is SIGINT; override to SIGTERM for standard
+# graceful shutdown semantics.
+kill_signal = "SIGTERM"
+
+# Grace period after SIGTERM before SIGKILL.
+# Worker tick execution: measured idle max ~321ms, estimated active max ~2s.
+# 10 seconds provides generous margin for tick completion + cleanup.
+kill_timeout = 10
+
+# ------------------------------------------------------------------------------
+# Build configuration
+# ------------------------------------------------------------------------------
+[build]
+  # Uses the Dockerfile in the project root
+  dockerfile = "Dockerfile"
+
+# ------------------------------------------------------------------------------
+# Deployment strategy
+# ------------------------------------------------------------------------------
+[deploy]
+  # "immediate" replaces all Machines at once without waiting for health checks.
+  # For a singleton worker, this means the old Machine is brought down and
+  # replaced, preventing old/new overlap during deployment.
+  #
+  # Evidence classification: DOCUMENTATION-SUPPORTED DEPLOYMENT SEMANTICS
+  # Not experimentally verified for this specific application.
+  strategy = "immediate"
+
+# ------------------------------------------------------------------------------
+# Non-sensitive environment variables
+# ------------------------------------------------------------------------------
+[env]
+  NODE_ENV = "production"
+
+# ------------------------------------------------------------------------------
+# Restart policy
+# ------------------------------------------------------------------------------
+# Worker error policy:
+#   - Known transient error → continue loop (handled in worker.ts)
+#   - Unknown/fatal error → process.exit(1)
+#
+# "on-failure" restarts the Machine only on non-zero exit codes (crashes).
+# Graceful shutdown (exit 0 via SIGTERM) will NOT trigger a restart.
+[[restart]]
+  policy = "on-failure"
+  retries = 5
+
+# ------------------------------------------------------------------------------
+# VM sizing
+# ------------------------------------------------------------------------------
+# Smallest available Machine. Worker is lightweight:
+# sequential DB queries + synchronous bot evaluation.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# ------------------------------------------------------------------------------
+# NO HTTP service
+# ------------------------------------------------------------------------------
+# This worker does not serve HTTP traffic.
+# No [http_service] or [[services]] section is defined intentionally.
+# No ports are exposed.
+# auto_stop_machines / auto_start_machines are NOT configured because
+# they depend on the Fly Proxy detecting HTTP traffic, which this worker
+# does not receive. The Machine must remain always-on.

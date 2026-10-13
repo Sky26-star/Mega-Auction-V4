@@ -1,0 +1,46 @@
+# ==============================================================================
+# Mega Auction V3 — Docker Build Context Exclusions
+# ==============================================================================
+
+# Dependencies (installed fresh in Docker)
+node_modules
+
+# Next.js build output (not needed for worker)
+.next
+out
+build
+
+# Environment files (secrets injected via Fly secrets)
+.env*.local
+.env
+
+# Git
+.git
+.gitignore
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Testing
+coverage
+playwright-report
+test-results
+
+# Supabase local runtime
+supabase/.temp
+supabase/.branches
+
+# Scratch / temporary
+scratch/
+scratch_measure.ts
+scratch_measure_active.ts
+*.log
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+
+# Fly config (not needed inside container)
+fly.toml
