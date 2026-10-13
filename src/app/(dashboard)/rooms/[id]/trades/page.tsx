@@ -769,7 +769,7 @@ export default function TradeCenterPage() {
 
                     {/* Plain Explanation */}
                     <p className="text-[11px] text-[#9CA6A0] italic leading-relaxed">
-                      "{fairnessResult.explanation}"
+                      &quot;{fairnessResult.explanation}&quot;
                     </p>
 
                     {/* Notes Input */}
@@ -949,7 +949,7 @@ export default function TradeCenterPage() {
 
                       {trade.proposer_notes && (
                         <p className="text-xs text-[#9CA6A0] italic">
-                          "{trade.proposer_notes}"
+                          &quot;{trade.proposer_notes}&quot;
                         </p>
                       )}
 
