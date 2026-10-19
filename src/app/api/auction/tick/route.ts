@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { evaluateBotsForLot, AuctionContext, computeFutureQualityMap, computeFutureOverseasByRole } from '@/lib/auction/server-bot-engine';
-import { syncBotMemoryWithState, recordBotBidObservation, clearInactiveAuctionMemory } from '@/lib/auction/bot-brain-memory';
+import { syncBotMemoryWithState, clearInactiveAuctionMemory } from '@/lib/auction/bot-brain-memory';
+import { submitBotBid } from '@/lib/auction/bot-bid-submission';
 import { updateBotBrainState, clearInactiveBrainStateCache } from '@/lib/auction/bot-brain-state';
 import crypto from 'crypto';
 
@@ -370,40 +371,23 @@ export async function POST(request: Request) {
           // Place the bid via RPC
           const requestId = crypto.randomUUID();
 
-          const { data, error } = await supabase.rpc('v3_place_bid', {
-            p_auction_id: auction.id,
-            p_lot_id: lot.id,
-            p_team_id: bid.teamId,
-            p_request_id: requestId,
-            p_is_bot: true
-          });
-
-          const rpcSuccess = !error && Boolean(data && data.success === true);
-          const rpcError = error ? error.message : (Boolean(data && data.success === false) ? (data?.error || 'REJECTED') : null);
-
-          let acceptedAmount: number | null = null;
-          let persistedAmount: number | null = null;
-
-          if (rpcSuccess) {
-            if (typeof data.amount === 'number') {
-              acceptedAmount = data.amount;
+          const { data, error, rpcError, acceptedAmount, persistedAmount, isApplied } = await submitBotBid(
+            () => supabase.rpc('v3_place_bid', {
+              p_auction_id: auction.id,
+              p_lot_id: lot.id,
+              p_team_id: bid.teamId,
+              p_request_id: requestId,
+              p_is_bot: true
+            }),
+            {
+              auctionId: auction.id,
+              teamId: bid.teamId,
+              playerId: lot.player_id,
+              isFinalBid: bid.isFinalBid,
             }
-            if (typeof data.current_bid === 'number') {
-              persistedAmount = data.current_bid;
-            } else if (acceptedAmount !== null) {
-              persistedAmount = acceptedAmount;
-            }
-            if (acceptedAmount === null && persistedAmount !== null) {
-              acceptedAmount = persistedAmount;
-            }
-          }
-
-          const isApplied = rpcSuccess && acceptedAmount !== null && persistedAmount !== null;
+          );
 
           if (isApplied) {
-            // Record the confirmed accepted amount in bot memory (never fall back to proposed amount)
-            recordBotBidObservation(auction.id, bid.teamId, lot.player_id, acceptedAmount!);
-
             console.error(
               `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nlotIndex=${lot.lot_index}\nphase=BIDDING\naction=BOT_BID\nteam=${bid.teamId}\nproposedAmount=${bid.nextBidAmount}\nacceptedAmount=${acceptedAmount}\npersistedAmount=${persistedAmount}\namount=${acceptedAmount}\nresult=APPLIED`
             );

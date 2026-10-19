@@ -437,6 +437,10 @@ function evaluateBotsForLot(botTeams, player, currentBid, basePrice, highestBidd
         // -------------------------------------------------------------
         var decision = 'DROP';
         var delayMs = 0;
+        var brainStateFinalBid = brainState && brainState.memory && brainState.memory.observedBids && brainState.memory.observedBids[player.id] && brainState.memory.observedBids[player.id].isFinalBid === true;
+        var cachedBidObs = bot_brain_memory_1.getBotMemory(auctionId, bot.id).observedBids[player.id];
+        var cachedFinalBid = cachedBidObs && cachedBidObs.isFinalBid === true;
+        var hasAlreadyPlacedFinalBid = Boolean(brainStateFinalBid || cachedFinalBid);
         if (humanDecision.action === 'BID') {
             decision = 'ENTER';
             var seed = "".concat(auctionId, "_").concat(player.id, "_").concat(bot.id, "_").concat(nextBidAmount, "_").concat(currentBid);
@@ -449,22 +453,19 @@ function evaluateBotsForLot(botTeams, player, currentBid, basePrice, highestBidd
             });
             (0, bot_brain_memory_1.recordBotBidObservation)(auctionId, bot.id, player.id, humanDecision.bidAmount, false);
         }
-        else if (humanDecision.action === 'STRETCH') {
+        else if (humanDecision.action === 'STRETCH' && !hasAlreadyPlacedFinalBid) {
             decision = 'ONE_LAST_BID';
             delayMs = Math.min(Math.max(1500, Math.floor(3000 * (1 - ((_h = (_g = brainState === null || brainState === void 0 ? void 0 : brainState.plan) === null || _g === void 0 ? void 0 : _g.urgency) !== null && _h !== void 0 ? _h : 0)))), Math.max(500, remainingTimerMs - 400));
             validBids.push({
                 teamId: bot.id,
                 nextBidAmount: humanDecision.bidAmount,
-                delayMs: delayMs
+                delayMs: delayMs,
+                isFinalBid: true
             });
-            (0, bot_brain_memory_1.recordBotBidObservation)(auctionId, bot.id, player.id, humanDecision.bidAmount, true);
-            if ((_j = brainState === null || brainState === void 0 ? void 0 : brainState.memory) === null || _j === void 0 ? void 0 : _j.observedBids) {
-                brainState.memory.observedBids[player.id] = {
-                    highestBid: humanDecision.bidAmount,
-                    observedAt: Date.now(),
-                    isFinalBid: true,
-                };
-            }
+        }
+        else if (humanDecision.action === 'STRETCH') {
+            decision = 'DROP';
+            delayMs = 0;
         }
         else {
             // humanDecision.action === 'PASS'

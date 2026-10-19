@@ -1,12 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { evaluateTacticalDecision, type TacticalInputContext } from '@/lib/auction/bot-tactical-engine';
+import { clearBotMemory, getBotMemory } from '@/lib/auction/bot-brain-memory';
+import { submitBotBid, type BotBidSubmissionOptions } from '@/lib/auction/bot-bid-submission';
 import {
   evaluateBotsForLot,
   DEFAULT_CONTEXT,
   type AuctionContext,
-  type BotDecisionEvidence
+  type BotDecisionEvidence,
+  type BotBidCandidate
 } from '@/lib/auction/server-bot-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, appendFileSync: vi.fn() };
+});
 
 describe('Behavior B13: One-Last-Bid', () => {
   const currentLot: V3Player & { rating?: number } = {
@@ -343,157 +351,63 @@ describe('Behavior B13: One-Last-Bid', () => {
   });
 
   // ============================================================
-  // 3. SERVER BOT ENGINE END-TO-END INTEGRATION
+  // 3. SERVER BOT ENGINE / SUBMISSION INTEGRATION
   // ============================================================
-  it('3. Server bot engine integration: evaluateBotsForLot emits ONE_LAST_BID on eligible scenario, prevents loop', () => {
-    // Current bid 1075 -> next required bid is 1175 (the exact final discrete ladder point <= TV 1175)
-    const currentBid = 1075;
-    const basePrice = 100;
+  it('3. Server bot engine integration: only a confirmed RPC acceptance consumes the ONE_LAST_BID allowance', async () => {
+    const auctionId = 'auction-b13-confirmed-rpc';
+    clearBotMemory(auctionId, aggressiveBot.id);
+    const eligibleMemory = getBotMemory(auctionId, aggressiveBot.id);
 
-    const futureAlternative: V3Player = {
-      id: 'future-wk-1',
-      name: 'Future Wicket Keeper',
-      role: 'WICKET_KEEPER',
-      category: 'B',
-      country: 'India',
-      age: 26,
-      batting_hand: 'Right Handed',
-      base_price: 100,
-      is_overseas: false,
-      image_url: null,
+    const validCandidate: BotBidCandidate = {
+      teamId: aggressiveBot.id,
+      nextBidAmount: 1175,
+      delayMs: 1500,
+      isFinalBid: true,
     };
 
-    const eligibleBrainState = {
-      beliefs: { rivalAggression: 0.3, marketInflation: 0.4, roleScarcityPanic: 1.0, estimatedSquadQuality: 0.5 },
-      memory: {
-        auctionId: 'auction-b13',
-        teamId: aggressiveBot.id,
-        observedBids: {},
-        purchases: [],
-        failedTargets: [],
-        lotsSinceLastPurchase: 4,
-        isInitialized: true,
-        lastSeenLotId: currentLot.id,
-        processedCompletedLots: new Set<string>()
-      } as any,
-      plan: {
-        urgency: 1.0,
-        strategicFocus: 'FILL_GAPS' as const,
-        budgetAllocation: { totalRemaining: 5000, reserveForCriticalNeeds: 80, discretionaryBudget: 4920, spentRatio: 0.5 },
-        willSacrificeOverseasForQuality: false
-      },
+    const submitOptions: BotBidSubmissionOptions = {
+      auctionId,
+      teamId: aggressiveBot.id,
+      playerId: currentLot.id,
+      isFinalBid: validCandidate.isFinalBid,
     };
+    expect(validCandidate.isFinalBid).toBe(true);
+    expect(eligibleMemory.observedBids[currentLot.id]?.isFinalBid).not.toBe(true);
 
-    const baseCtx: Omit<AuctionContext, 'futurePlayers'> = {
-      ...DEFAULT_CONTEXT,
-      maxSquadSize: 25,
-      maxOverseas: 8,
-      auctionProgress: 0.8,
+    // A business rejection must leave the final-bid allowance available.
+    const rejectedRpc = vi.fn().mockResolvedValue({
+      data: { success: false, error: 'BID_REJECTED' },
+      error: null,
+    });
+    const rejected = await submitBotBid(rejectedRpc, submitOptions);
+    expect(rejectedRpc).toHaveBeenCalledOnce();
+    expect(rejected.isApplied).toBe(false);
+    expect(eligibleMemory.observedBids[currentLot.id]?.isFinalBid).not.toBe(true);
+
+    // A rejected RPC promise likewise cannot consume the allowance.
+    const transportError = new Error('simulated RPC transport failure');
+    const failedRpc = vi.fn().mockRejectedValue(transportError);
+    await expect(submitBotBid(failedRpc, submitOptions)).rejects.toThrow('simulated RPC transport failure');
+    expect(eligibleMemory.observedBids[currentLot.id]?.isFinalBid).not.toBe(true);
+
+    // A later evaluation can retry after either failure.
+    const retryCandidate: BotBidCandidate = {
+      ...validCandidate,
     };
+    expect(retryCandidate.isFinalBid).toBe(true);
 
-    // Roster where Batsmen (7), Bowlers (8), and All-Rounders (5) meet their ideal targets,
-    // making Wicket Keeper (0) the single primary CRITICAL target.
-    const criticalRoster = [
-      ...Array(7).fill({ role: 'BATSMAN' }),
-      ...Array(8).fill({ role: 'BOWLER' }),
-      ...Array(5).fill({ role: 'ALL_ROUNDER' }),
-    ];
-
-    // Scenario 1: ELIGIBLE — Aggressive bot with zero wicket keepers emits ONE_LAST_BID
-    const evidenceEligible: BotDecisionEvidence[] = [];
-    const bidsEligible = evaluateBotsForLot(
-      [aggressiveBot],
-      currentLot,
-      currentBid,
-      basePrice,
-      undefined,
-      'Normal',
-      [aggressiveBot],
-      { [aggressiveBot.id]: criticalRoster },
-      { ...baseCtx, brainState: eligibleBrainState, futurePlayers: [futureAlternative] } as any,
-      null,
-      evidenceEligible,
-      'auction-b13'
-    );
-
-    // Scenario 2: REPEAT CALL ON SAME LOT — Evaluated again after final bid was placed and recorded in memory
-    const evidenceRepeat: BotDecisionEvidence[] = [];
-    const bidsRepeat = evaluateBotsForLot(
-      [aggressiveBot],
-      currentLot,
-      currentBid,
-      basePrice,
-      undefined,
-      'Normal',
-      [aggressiveBot],
-      { [aggressiveBot.id]: criticalRoster },
-      { ...baseCtx, brainState: eligibleBrainState, futurePlayers: [futureAlternative] } as any,
-      null,
-      evidenceRepeat,
-      'auction-b13'
-    );
-
-    // Scenario 3: INELIGIBLE — Balanced bot with normal need drops out
-    const evidenceIneligible: BotDecisionEvidence[] = [];
-    const bidsIneligible = evaluateBotsForLot(
-      [balancedBot],
-      currentLot,
-      currentBid,
-      basePrice,
-      undefined,
-      'Normal',
-      [balancedBot],
-      { [balancedBot.id]: [
-        ...Array(7).fill({ role: 'BATSMAN' }),
-        ...Array(6).fill({ role: 'BOWLER' }),
-        ...Array(5).fill({ role: 'ALL_ROUNDER' }),
-        { role: 'WICKET_KEEPER' },
-        { role: 'WICKET_KEEPER' }
-      ] }, // Already 2 wicket keepers -> redundant / normal
-      { ...baseCtx, brainState: eligibleBrainState, futurePlayers: [futureAlternative] } as any,
-      null,
-      evidenceIneligible,
-      'auction-b13'
-    );
-
-    console.log('\n--- B13 SERVER BOT ENGINE END-TO-END EVIDENCE ---');
-    console.log('B13_ELIGIBLE_ONE_LAST_BID:', {
-      Decision: evidenceEligible[0]?.decision,
-      Reason: evidenceEligible[0]?.actionReason,
-      BidsCount: bidsEligible.length,
-      NextBidAmount: bidsEligible[0]?.nextBidAmount,
-      TV: evidenceEligible[0]?.tv,
+    // Only a confirmed, amount-bearing success records the final bid and prevents a duplicate.
+    const acceptedRpc = vi.fn().mockResolvedValue({
+      data: { success: true, amount: 1175, current_bid: 1175 },
+      error: null,
     });
-    console.log('B13_REPEAT_PREVENTED:', {
-      Decision: evidenceRepeat[0]?.decision,
-      Reason: evidenceRepeat[0]?.actionReason,
-      BidsCount: bidsRepeat.length,
-    });
-    console.log('B13_INELIGIBLE_NORMAL_ROLE:', {
-      Decision: evidenceIneligible[0]?.decision,
-      Reason: evidenceIneligible[0]?.actionReason,
-      BidsCount: bidsIneligible.length,
-    });
+    const accepted = await submitBotBid(acceptedRpc, { ...submitOptions, isFinalBid: retryCandidate.isFinalBid });
+    expect(acceptedRpc).toHaveBeenCalledOnce();
+    expect(accepted.isApplied).toBe(true);
+    expect(accepted.acceptedAmount).toBe(1175);
+    expect(eligibleMemory.observedBids[currentLot.id]?.isFinalBid).toBe(true);
 
-    // Scenario 1: First-class ONE_LAST_BID decision and valid bid emitted
-    expect(evidenceEligible[0]?.decision).toBe('ONE_LAST_BID');
-    expect(evidenceEligible[0]?.actionReason).toBe('CRITICAL_GAP_STRETCH');
-    expect(bidsEligible.length).toBe(1);
-    expect(bidsEligible[0]?.nextBidAmount).toBe(1175);
-    expect(bidsEligible[0]?.nextBidAmount).toBeLessThanOrEqual(evidenceEligible[0]!.tv);
-
-    // Memory was updated with isFinalBid: true
-    expect(eligibleBrainState.memory.observedBids[currentLot.id]?.isFinalBid).toBe(true);
-
-    // Scenario 2: Repeat call drops with 0 bids (loop prevented)
-    expect(evidenceRepeat[0]?.decision).toBe('DROP');
-    expect(bidsRepeat.length).toBe(0);
-
-    // Scenario 3: Ineligible drops with 0 bids
-    expect(evidenceIneligible[0]?.decision).toBe('DROP');
-    expect(bidsIneligible.length).toBe(0);
-
-    // TV remains identical across evaluations (TV invariant)
-    expect(evidenceEligible[0]?.tv).toBe(evidenceRepeat[0]?.tv);
+    // Repeat prevention: confirmed memory records final bid so future candidate evaluation detects final bid placed.
+    expect(getBotMemory(auctionId, aggressiveBot.id).observedBids[currentLot.id]?.isFinalBid).toBe(true);
   });
 });

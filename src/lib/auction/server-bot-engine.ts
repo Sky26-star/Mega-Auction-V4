@@ -7,7 +7,7 @@ import { buildStrategicDecisionPolicy, type StrategicDecisionPolicy } from './bo
 import { evaluateQAndTV } from './bot-q-engine';
 import { evaluateTacticalDecision, computeReactionDelay, getDeterministicPseudoRandom } from './bot-tactical-engine';
 import { getBotBrainState } from './bot-brain-state';
-import { recordBotBidObservation, recordRivalBidObservation } from './bot-brain-memory';
+import { recordRivalBidObservation, getBotMemory } from './bot-brain-memory';
 import {
   assemblePlayerContext,
   assemblePlayerQualityContext,
@@ -47,6 +47,14 @@ import type {
 export type BotPersonality = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE' | 'OPPORTUNISTIC' | 'STRATEGIC';
 export type BotDecision = 'SKIP' | 'ENTER' | 'HESITATE' | 'DROP' | 'ONE_LAST_BID';
 export type RoleNeed = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW' | 'REDUNDANT';
+
+export interface BotBidCandidate {
+  teamId: string;
+  nextBidAmount: number;
+  delayMs: number;
+  /** Record the one-last-bid allowance only after the bid RPC succeeds. */
+  isFinalBid?: boolean;
+}
 
 export interface BotDecisionEvidence {
   teamId: string;
@@ -322,7 +330,7 @@ export function evaluateBotsForLot(
   passedAuctionId?: string
 ) {
   const nextBidAmount = getNextBidAmount(currentBid, basePrice);
-  const validBids: { teamId: string; nextBidAmount: number; delayMs: number }[] = [];
+  const validBids: BotBidCandidate[] = [];
 
   const highestBidder = allTeams.find(t => t.id === highestBidderTeamId);
   const remainingTimerMs = timerExpiresAt ? new Date(timerExpiresAt).getTime() - Date.now() : 15000;
@@ -570,6 +578,9 @@ export function evaluateBotsForLot(
     let decision: BotDecision = 'DROP';
     let delayMs = 0;
 
+    const hasAlreadyPlacedFinalBid = brainState?.memory?.observedBids?.[player.id]?.isFinalBid === true
+      || getBotMemory(auctionId, bot.id).observedBids[player.id]?.isFinalBid === true;
+
     if (humanDecision.action === 'BID') {
       decision = 'ENTER';
       const seed = `${auctionId}_${player.id}_${bot.id}_${nextBidAmount}_${currentBid}`;
@@ -581,7 +592,7 @@ export function evaluateBotsForLot(
         nextBidAmount: humanDecision.bidAmount,
         delayMs
       });
-    } else if (humanDecision.action === 'STRETCH') {
+    } else if (humanDecision.action === 'STRETCH' && !hasAlreadyPlacedFinalBid) {
       decision = 'ONE_LAST_BID';
       delayMs = Math.min(
         Math.max(1500, Math.floor(3000 * (1 - (brainState?.plan?.urgency ?? 0)))),
@@ -591,8 +602,12 @@ export function evaluateBotsForLot(
       validBids.push({
         teamId: bot.id,
         nextBidAmount: humanDecision.bidAmount,
-        delayMs
+        delayMs,
+        isFinalBid: true,
       });
+    } else if (humanDecision.action === 'STRETCH') {
+      decision = 'DROP';
+      delayMs = 0;
     } else {
       // humanDecision.action === 'PASS'
       decision = 'DROP';
