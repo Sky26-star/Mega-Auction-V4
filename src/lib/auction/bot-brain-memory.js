@@ -43,7 +43,7 @@ function getBotMemory(auctionId, teamId) {
  * Clears memory for an entire auction (e.g., when completed/cancelled).
  */
 function clearAuctionMemory(auctionId) {
-    for (var _i = 0, _a = botMemoryCache.keys(); _i < _a.length; _i++) {
+    for (var _i = 0, _a = Array.from(botMemoryCache.keys()); _i < _a.length; _i++) {
         var key = _a[_i];
         if (key.startsWith("".concat(auctionId, "_"))) {
             botMemoryCache.delete(key);
@@ -54,7 +54,7 @@ function clearAuctionMemory(auctionId) {
  * Clears memory for all auctions that are no longer in the active tracked set.
  */
 function clearInactiveAuctionMemory(activeAuctionIds) {
-    for (var _i = 0, _a = botMemoryCache.keys(); _i < _a.length; _i++) {
+    for (var _i = 0, _a = Array.from(botMemoryCache.keys()); _i < _a.length; _i++) {
         var key = _a[_i];
         var auctionId = key.split('_')[0];
         if (auctionId && !activeAuctionIds.has(auctionId)) {

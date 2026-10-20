@@ -581,7 +581,17 @@ export function evaluateBotsForLot(
     const hasAlreadyPlacedFinalBid = brainState?.memory?.observedBids?.[player.id]?.isFinalBid === true
       || getBotMemory(auctionId, bot.id).observedBids[player.id]?.isFinalBid === true;
 
-    if (humanDecision.action === 'BID') {
+    // Tactical drop behaviors within maximum rational ceiling (B3 purse pacing, B8 rival baiting, B11 rival intimidation)
+    const isTacticalDrop = humanDecision.action === 'BID' && tactical?.action === 'PASS' && (
+      tactical?.reason === 'EARLY_RESOURCE_PRESERVATION' ||
+      tactical?.reason === 'RIVAL_BAIT_DROP' ||
+      tactical?.reason === 'RIVAL_INTIMIDATION'
+    );
+
+    if (isTacticalDrop) {
+      decision = 'DROP';
+      delayMs = 0;
+    } else if (humanDecision.action === 'BID') {
       decision = 'ENTER';
       const seed = `${auctionId}_${player.id}_${bot.id}_${nextBidAmount}_${currentBid}`;
       const prng = getDeterministicPseudoRandom(seed);
@@ -615,9 +625,15 @@ export function evaluateBotsForLot(
     }
 
     // Determine primary diagnostic action reason:
-    // If tactical engine ran and its action agrees with Phase 7, preserve tactical reason for legacy compatibility.
-    // Otherwise, authoritative Phase 7 reason explains the decision.
-    const actionReason = (tactical?.action === humanDecision.action ? tactical?.reason : undefined) ?? humanDecision.reason;
+    // If deliberate tactical retreat within ceiling, explain with tactical drop reason.
+    // Otherwise preserve Phase 7 ceiling authority and distinguish price exceeding TV from rival bait.
+    const actionReason = isTacticalDrop
+      ? tactical!.reason
+      : (tactical?.action === humanDecision.action
+          ? (humanDecision.action === 'PASS' && (tactical?.reason === 'RIVAL_BAIT_DROP' || tactical?.reason === 'RIVAL_INTIMIDATION')
+              ? humanDecision.reason
+              : tactical?.reason)
+          : undefined) ?? humanDecision.reason;
 
     if (evidenceArr) {
       evidenceArr.push({

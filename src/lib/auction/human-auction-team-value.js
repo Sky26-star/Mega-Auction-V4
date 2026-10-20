@@ -153,7 +153,7 @@ function evaluateTeamValue(ctx) {
             reasons.push('Strategic Consequence: MAJOR UPGRADE. Provides a clear, major upgrade to the starting XI.');
         }
     }
-    else if (xiLevel === 'MAJOR_UPGRADE' || (xiLevel === 'USEFUL_STARTER' && need === 'IMPORTANT')) {
+    else if (xiLevel === 'MAJOR_UPGRADE' || (xiLevel === 'USEFUL_STARTER' && (need === 'IMPORTANT' || isCriticalTarget))) {
         if (createsFuturePressure) {
             strategicMultiplier = 0.95;
             strategicCommitment = 'JUSTIFIED';
@@ -183,8 +183,12 @@ function evaluateTeamValue(ctx) {
         }
         else {
             strategicMultiplier = 0.85;
-            strategicCommitment = 'NOT_COMMITTED';
-            reasons.push('Strategic Consequence: DEPTH. Primarily provides bench depth, reducing strategic value relative to market.');
+            strategicCommitment = (need === 'IMPORTANT' || isCriticalTarget) ? 'JUSTIFIED' : 'NOT_COMMITTED';
+            reasons.push(
+                (need === 'IMPORTANT' || isCriticalTarget)
+                    ? 'Strategic Consequence: DEPTH (NEEDED). Provides necessary squad depth for mandatory role requirements.'
+                    : 'Strategic Consequence: DEPTH. Primarily provides bench depth, reducing strategic value relative to market.'
+            );
         }
     }
     // Ensure minimum floor to prevent absurd negative multipliers

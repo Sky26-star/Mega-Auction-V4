@@ -107,11 +107,11 @@ describe('Behavior B3: Strategic Purse-Pacing Stage', () => {
 
       // Existing team roster already has batsmen, so roleNeed is NORMAL (non-critical)
       const existingRoster = [
-        makePlayer({ id: 'existing-bat-1', role: 'BATSMAN' }),
-        makePlayer({ id: 'existing-bat-2', role: 'BATSMAN' }),
-        makePlayer({ id: 'existing-bat-3', role: 'BATSMAN' }),
-        makePlayer({ id: 'existing-bat-4', role: 'BATSMAN' }),
-        makePlayer({ id: 'existing-bat-5', role: 'BATSMAN' }),
+        makePlayer({ id: 'existing-bat-1', role: 'BATSMAN', rating: 75 }),
+        makePlayer({ id: 'existing-bat-2', role: 'BATSMAN', rating: 75 }),
+        makePlayer({ id: 'existing-bat-3', role: 'BATSMAN', rating: 75 }),
+        makePlayer({ id: 'existing-bat-4', role: 'BATSMAN', rating: 70 }),
+        makePlayer({ id: 'existing-bat-5', role: 'BATSMAN', rating: 70 }),
       ];
       bot.players_bought = 5; // 20 slots remaining
 

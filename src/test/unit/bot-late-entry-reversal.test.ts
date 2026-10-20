@@ -27,6 +27,14 @@ describe('Behavior B14: Late Entry Reversal', () => {
     is_overseas: false,
     image_url: null,
     rating: 85,
+    matches: 80,
+    runs: 2800,
+    batting_average: 36,
+    strike_rate: 138,
+    boundaries: 350,
+    hundreds: 1,
+    fifties: 18,
+    highest_score: 104,
   };
 
   // Bot franchise: 4000L remaining purse, 5 players bought (20 slots remaining)

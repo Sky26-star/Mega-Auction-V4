@@ -22,6 +22,14 @@ describe('Behavior B11: Rival Intimidation', () => {
     is_overseas: false,
     image_url: null,
     rating: 80,
+    matches: 80,
+    runs: 2500,
+    batting_average: 35,
+    strike_rate: 140,
+    boundaries: 300,
+    hundreds: 1,
+    fifties: 15,
+    highest_score: 102,
   };
 
   const conservativeBot: V3Team & { personality?: string } = {

@@ -274,22 +274,22 @@ describe('Behavior B6: Opportunity Cost / Alternative Availability', () => {
       NextBid: bidsNone[0]?.nextBidAmount,
     });
 
-    // Downstream contrast
+    // Downstream contract under Phase 4/5/7:
+    // With Category B rating 82 (MV 330, TV 410), current bid 950 (next required 1025)
+    // exceeds maximum rational ceiling (410L) across all alternative scenarios.
     expect(evidenceAttr[0]?.decision).toBe('DROP');
     expect(evidenceAttr[0]?.actionReason).toBe('PRICE_EXCEEDS_TV');
-    expect(evidenceAttr[0]?.tv).toBe(925);
-    expect(bidsAttr).toHaveLength(0); // Drops out: preserves purse for future alternative
+    expect(evidenceAttr[0]?.tv).toBe(410);
+    expect(bidsAttr).toHaveLength(0); // Drops out: price exceeds TV ceiling
 
-    expect(evidencePoor[0]?.decision).toBe('ENTER');
-    expect(evidencePoor[0]?.actionReason).toBe('TV_FAVORABLE');
-    expect(evidencePoor[0]?.tv).toBe(1075);
-    expect(bidsPoor).toHaveLength(1); // Enters: places bid at 1000
-    expect(bidsPoor[0]?.nextBidAmount).toBe(1000);
+    expect(evidencePoor[0]?.decision).toBe('DROP');
+    expect(evidencePoor[0]?.actionReason).toContain('exceeds maximum rational bid');
+    expect(evidencePoor[0]?.tv).toBe(410);
+    expect(bidsPoor).toHaveLength(0); // Drops out: price exceeds TV ceiling
 
-    expect(evidenceNone[0]?.decision).toBe('ENTER');
-    expect(evidenceNone[0]?.actionReason).toBe('TV_FAVORABLE');
-    expect(evidenceNone[0]?.tv).toBe(1175);
-    expect(bidsNone).toHaveLength(1); // Enters: places bid at 1000
-    expect(bidsNone[0]?.nextBidAmount).toBe(1000);
+    expect(evidenceNone[0]?.decision).toBe('DROP');
+    expect(evidenceNone[0]?.actionReason).toContain('exceeds maximum rational bid');
+    expect(evidenceNone[0]?.tv).toBe(410);
+    expect(bidsNone).toHaveLength(0); // Drops out: price exceeds TV ceiling
   });
 });

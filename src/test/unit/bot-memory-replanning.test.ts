@@ -83,6 +83,11 @@ describe('Behavior B17-B: Replanning & Next-Action Consumption', () => {
     const candidatePlayer = makePlayer('p-rival-test', {
       base_price: 200,
       category: 'B',
+      rating: 85,
+      matches: 70,
+      runs: 2200,
+      batting_average: 34,
+      strike_rate: 136,
       role: 'BATSMAN'
     });
 

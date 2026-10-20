@@ -441,7 +441,16 @@ function evaluateBotsForLot(botTeams, player, currentBid, basePrice, highestBidd
         var cachedBidObs = bot_brain_memory_1.getBotMemory(auctionId, bot.id).observedBids[player.id];
         var cachedFinalBid = cachedBidObs && cachedBidObs.isFinalBid === true;
         var hasAlreadyPlacedFinalBid = Boolean(brainStateFinalBid || cachedFinalBid);
-        if (humanDecision.action === 'BID') {
+        var isTacticalDrop = humanDecision.action === 'BID' && (tactical === null || tactical === void 0 ? void 0 : tactical.action) === 'PASS' && (
+            (tactical === null || tactical === void 0 ? void 0 : tactical.reason) === 'EARLY_RESOURCE_PRESERVATION' ||
+            (tactical === null || tactical === void 0 ? void 0 : tactical.reason) === 'RIVAL_BAIT_DROP' ||
+            (tactical === null || tactical === void 0 ? void 0 : tactical.reason) === 'RIVAL_INTIMIDATION'
+        );
+        if (isTacticalDrop) {
+            decision = 'DROP';
+            delayMs = 0;
+        }
+        else if (humanDecision.action === 'BID') {
             decision = 'ENTER';
             var seed = "".concat(auctionId, "_").concat(player.id, "_").concat(bot.id, "_").concat(nextBidAmount, "_").concat(currentBid);
             var prng = (0, bot_tactical_engine_1.getDeterministicPseudoRandom)(seed);
@@ -473,9 +482,13 @@ function evaluateBotsForLot(botTeams, player, currentBid, basePrice, highestBidd
             delayMs = 0;
         }
         // Determine primary diagnostic action reason:
-        // If tactical engine ran and its action agrees with Phase 7, preserve tactical reason for legacy compatibility.
-        // Otherwise, authoritative Phase 7 reason explains the decision.
-        var actionReason = (_k = ((tactical === null || tactical === void 0 ? void 0 : tactical.action) === humanDecision.action ? tactical === null || tactical === void 0 ? void 0 : tactical.reason : undefined)) !== null && _k !== void 0 ? _k : humanDecision.reason;
+        var actionReason = isTacticalDrop
+            ? tactical.reason
+            : (_k = ((tactical === null || tactical === void 0 ? void 0 : tactical.action) === humanDecision.action
+                ? (humanDecision.action === 'PASS' && ((tactical === null || tactical === void 0 ? void 0 : tactical.reason) === 'RIVAL_BAIT_DROP' || (tactical === null || tactical === void 0 ? void 0 : tactical.reason) === 'RIVAL_INTIMIDATION')
+                    ? humanDecision.reason
+                    : tactical === null || tactical === void 0 ? void 0 : tactical.reason)
+                : undefined)) !== null && _k !== void 0 ? _k : humanDecision.reason;
         if (evidenceArr) {
             evidenceArr.push({
                 teamId: bot.id,

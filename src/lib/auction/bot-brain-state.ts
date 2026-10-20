@@ -490,7 +490,13 @@ export interface BotBrainStateInput {
 // ============================================================
 
 /** Cache key: "auctionId_teamId" â†’ latest frozen BotBrainState */
-const brainStateCache = new Map<string, Readonly<BotBrainState>>();
+const globalForBotBrainState = globalThis as unknown as {
+  __BOT_BRAIN_STATE_CACHE__: Map<string, Readonly<BotBrainState>>;
+};
+const brainStateCache = globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__ || new Map<string, Readonly<BotBrainState>>();
+if (!globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__) {
+  globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__ = brainStateCache;
+}
 
 function brainStateCacheKey(auctionId: string, teamId: string): string {
   return `${auctionId}_${teamId}`;

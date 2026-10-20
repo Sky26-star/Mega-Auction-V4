@@ -290,7 +290,11 @@ function computeWillSacrificeOverseas(overseasCount, maxOverseas, squadQuality) 
 // Cleanup uses the same auction lifecycle boundary as BotMemory.
 // ============================================================
 /** Cache key: "auctionId_teamId" â†’ latest frozen BotBrainState */
-var brainStateCache = new Map();
+var globalForBotBrainState = globalThis;
+var brainStateCache = globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__ || new Map();
+if (!globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__) {
+    globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__ = brainStateCache;
+}
 function brainStateCacheKey(auctionId, teamId) {
     return "".concat(auctionId, "_").concat(teamId);
 }

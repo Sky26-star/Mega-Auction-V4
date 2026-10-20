@@ -142,16 +142,28 @@ describe('B1–B17 Cross-Behavior Integration Gate', () => {
   // 2. B3 PURSE PACING + B6 OPPORTUNITY COST
   // ============================================================
   it('2. B3 Purse Pacing + B6 Opportunity Cost: Plentiful alternatives elevate Q_skip and trigger early preservation PASS', () => {
-    const candidateBatsman = makePlayer('gate-bat-pacing', { role: 'BATSMAN', base_price: 100 });
+    const candidateBatsman = makePlayer('gate-bat-pacing', {
+      role: 'BATSMAN',
+      base_price: 100,
+      rating: 85,
+      matches: 80,
+      runs: 2800,
+      batting_average: 36,
+      strike_rate: 138,
+      boundaries: 350,
+      hundreds: 1,
+      fifties: 18,
+      highest_score: 104,
+    });
     const bot = makeBot(botTeamAlpha, { purse: 4000, players_bought: 5, personality: 'BALANCED' } as any);
 
     // Existing roster already satisfies baseline batsman target, so roleNeed is NORMAL (non-critical)
     const existingRoster: V3Player[] = [
-      makePlayer('roster-b1', { role: 'BATSMAN', base_price: 100 }),
-      makePlayer('roster-b2', { role: 'BATSMAN', base_price: 100 }),
-      makePlayer('roster-b3', { role: 'BATSMAN', base_price: 100 }),
-      makePlayer('roster-b4', { role: 'BATSMAN', base_price: 50 }),
-      makePlayer('roster-b5', { role: 'BATSMAN', base_price: 50 })
+      makePlayer('roster-b1', { role: 'BATSMAN', rating: 75, base_price: 100 }),
+      makePlayer('roster-b2', { role: 'BATSMAN', rating: 75, base_price: 100 }),
+      makePlayer('roster-b3', { role: 'BATSMAN', rating: 75, base_price: 100 }),
+      makePlayer('roster-b4', { role: 'BATSMAN', rating: 70, base_price: 50 }),
+      makePlayer('roster-b5', { role: 'BATSMAN', rating: 70, base_price: 50 })
     ];
 
     // Plentiful high-quality alternatives in future pool
@@ -370,15 +382,25 @@ describe('B1–B17 Cross-Behavior Integration Gate', () => {
   // 6. B14 LATE ENTRY REVERSAL + B17 MEMORY CAPTURE / REPLANNING
   // ============================================================
   it('6. B14 Late Entry Reversal + B17 Memory: Event capture and replanning cause valid PASS -> BID reversal', () => {
-    const candidatePlayer = makePlayer('gate-reversal-p1', { base_price: 100 });
+    const candidatePlayer = makePlayer('gate-reversal-p1', {
+      base_price: 100,
+      matches: 80,
+      runs: 2800,
+      batting_average: 36,
+      strike_rate: 138,
+      boundaries: 350,
+      hundreds: 1,
+      fifties: 18,
+      highest_score: 104,
+    });
     const bot = makeBot(botTeamAlpha, { purse: 4000, players_bought: 5, personality: 'BALANCED' } as any);
     const allTeams = [bot, { id: rivalTeamId } as V3Team];
     const existingRoster: V3Player[] = [
-      makePlayer('rev-b1', { role: 'BATSMAN', base_price: 100 }),
-      makePlayer('rev-b2', { role: 'BATSMAN', base_price: 100 }),
-      makePlayer('rev-b3', { role: 'BATSMAN', base_price: 100 }),
-      makePlayer('rev-b4', { role: 'BATSMAN', base_price: 50 }),
-      makePlayer('rev-b5', { role: 'BATSMAN', base_price: 50 })
+      makePlayer('rev-b1', { role: 'BATSMAN', rating: 75, base_price: 100 }),
+      makePlayer('rev-b2', { role: 'BATSMAN', rating: 75, base_price: 100 }),
+      makePlayer('rev-b3', { role: 'BATSMAN', rating: 75, base_price: 100 }),
+      makePlayer('rev-b4', { role: 'BATSMAN', rating: 70, base_price: 50 }),
+      makePlayer('rev-b5', { role: 'BATSMAN', rating: 70, base_price: 50 })
     ];
     const teamRosters = { [bot.id]: existingRoster };
 

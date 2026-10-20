@@ -189,8 +189,12 @@ export function evaluateTeamValue(ctx: TeamValueContext): TeamValueResult {
       reasons.push('Strategic Consequence: POOR FIT DEPTH. Depth player with poor structural fit.');
     } else {
       strategicMultiplier = 0.85;
-      strategicCommitment = 'NOT_COMMITTED';
-      reasons.push('Strategic Consequence: DEPTH. Primarily provides bench depth, reducing strategic value relative to market.');
+      strategicCommitment = (need === 'IMPORTANT' || isCriticalTarget) ? 'JUSTIFIED' : 'NOT_COMMITTED';
+      reasons.push(
+        (need === 'IMPORTANT' || isCriticalTarget)
+          ? 'Strategic Consequence: DEPTH (NEEDED). Provides necessary squad depth for mandatory role requirements.'
+          : 'Strategic Consequence: DEPTH. Primarily provides bench depth, reducing strategic value relative to market.'
+      );
     }
   }
 
