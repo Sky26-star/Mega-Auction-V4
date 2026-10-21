@@ -11,10 +11,15 @@
 #   - No autoscaling.
 #   - Deployment strategy prevents old/new worker overlap.
 #
-# SECRETS (must be set via `fly secrets set` before first deploy):
-#   - NEXT_PUBLIC_SUPABASE_URL
-#   - NEXT_PUBLIC_SUPABASE_ANON_KEY
-#   - SUPABASE_SERVICE_ROLE_KEY
+# WORKER CONFIGURATION (required before deploy):
+#   - AUCTION_TICK_URL: HTTPS URL of the trusted V4 Next.js service's
+#     /api/auction/tick endpoint. The actual service URL must be confirmed by
+#     the deployment owner; do not point this at an untrusted host.
+#   - AUCTION_TICK_SECRET: provision through Fly secrets and also provision the
+#     same environment-specific value in the Next.js server environment.
+#     Never expose it through a NEXT_PUBLIC_* variable.
+# The worker no longer connects to Supabase directly. Keep the service-role key
+# only in the trusted Next.js server environment.
 #
 # SINGLETON ENFORCEMENT:
 #   After first deploy, run:

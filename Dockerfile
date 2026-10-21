@@ -30,11 +30,8 @@ COPY package.json package-lock.json ./
 # Copy worker entrypoint
 COPY scripts/ ./scripts/
 
-# Copy application source required by worker import chain:
-#   worker.ts → auction-orchestrator.ts → server-bot-engine.ts
-#                                       → bot-brain-memory.ts
-#                                       → bot-brain-state.ts
-#   worker.ts → admin.ts → env.ts
+# Copy application source required by the authenticated tick client import chain:
+#   worker.ts → tick-client.ts → tick-auth.ts
 COPY src/ ./src/
 
 # Copy TypeScript config (required by tsx path resolution)

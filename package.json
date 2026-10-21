@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/check-port.js && node scripts/start-dev.js",
+    "worker": "tsx scripts/worker.ts",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "check:no-diagnostic-route": "node scripts/verify-no-diagnostic-route.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
@@ -37,6 +39,7 @@
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
     "ts-node": "^10.9.2",
+    "tsx": "4.23.15",
     "zod": "^3.23.8",
     "zustand": "^5.0.1"
   },

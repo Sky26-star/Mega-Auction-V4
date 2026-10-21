@@ -1,7 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import dotenv from 'dotenv';
-
-dotenv.config({ path: '.env.local' });
+import './src/test/e2e/setup/e2e-target-guard';
 export default defineConfig({
   testDir: './src/test/e2e',
   fullyParallel: false,
@@ -21,9 +19,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'node scripts/start-prod.js',
+    command: 'node scripts/check-port.js && npm run build && node scripts/start-prod.js',
     url: 'http://localhost:3000',
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120000,
     stdout: 'pipe',
     stderr: 'pipe',

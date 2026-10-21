@@ -1,134 +1,72 @@
 import * as dotenv from 'dotenv';
+
 dotenv.config({ path: '.env.local' });
 dotenv.config();
 
-import { createAdminClient } from '../src/lib/supabase/admin';
-import { executeAuctionTick } from '../src/lib/auction/auction-orchestrator';
+import { getAuctionTickClientConfig, requestAuctionTick } from '../src/lib/auction/tick-client';
+import { retryDelayWithJitter, runAuctionTickLoop } from '../src/lib/auction/worker-runtime';
 
-// Phase 15 - Worker configuration
 const TARGET_INTERVAL_MS = 500;
-let isRunning = true;
-let currentTickPromise: Promise<void> | null = null;
+const controller = new AbortController();
+let shutdownSignal: NodeJS.Signals | undefined;
 
-/**
- * Deterministic error classifier for tick failures.
- * Only explicit networking, timeout, and definitively known transient Postgres errors
- * are considered recoverable. All other errors (including ENOTFOUND, ECONNREFUSED,
- * syntax errors, invalid logic) are fatal to avoid infinite 500ms retry loops on
- * persistent configuration/schema failures.
- */
-function isRecoverableTickError(err: any): boolean {
-  if (!err) return false;
-
-  // 1. Node.js native fetch / networking errors
-  if (err instanceof TypeError && err.message && err.message.includes('fetch failed')) {
-    return true;
-  }
-
-  // 2. Definitively Transient Node system network error codes
-  // Excludes ENOTFOUND, ECONNREFUSED, EHOSTUNREACH which often indicate persistent misconfiguration
-  const transientNetworkCodes = ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'];
-  if (err.code && transientNetworkCodes.includes(err.code)) {
-    return true;
-  }
-
-  // 3. Definitively Transient Postgres SQLSTATE codes
-  if (typeof err.code === 'string' && err.code.length === 5) {
-    const transientSqlStates = [
-      '40001', // serialization_failure
-      '40P01', // deadlock_detected
-      '53300', // too_many_connections
-      '53000', // insufficient_resources
-      '57014', // query_canceled (e.g. statement timeout)
-      '57P01', // admin_shutdown
-      '57P02', // crash_shutdown
-      '57P03', // cannot_connect_now
-      '08000', // connection_exception
-      '08003', // connection_does_not_exist
-      '08006'  // connection_failure
-    ];
-    if (transientSqlStates.includes(err.code)) {
-      return true;
-    }
-  }
-
-  return false;
+function requestShutdown(signal: NodeJS.Signals): void {
+  if (shutdownSignal) return;
+  shutdownSignal = signal;
+  console.log(`[WORKER] Received ${signal}; cancelling active in-flight request before shutdown.`);
+  controller.abort();
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+process.on('SIGINT', () => requestShutdown('SIGINT'));
+process.on('SIGTERM', () => requestShutdown('SIGTERM'));
 
-async function runWorker() {
-  console.log('[WORKER] Starting Persistent Auction Worker...');
-  
-  let supabase;
+async function runWorker(): Promise<void> {
+  console.log('[WORKER] Starting Mega Auction authoritative background worker...');
+  console.log(`[WORKER] Runtime: Node ${process.version} (pid: ${process.pid}, platform: ${process.platform})`);
+  console.log(`[WORKER] Environment: NODE_ENV=${process.env.NODE_ENV || 'development'}`);
+
+  // In non-production, allow falling back to NEXT_PUBLIC_APP_URL if AUCTION_TICK_URL is not set
+  if (!process.env.AUCTION_TICK_URL && process.env.NODE_ENV !== 'production' && process.env.NEXT_PUBLIC_APP_URL) {
+    const defaultUrl = `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/api/auction/tick`;
+    process.env.AUCTION_TICK_URL = defaultUrl;
+    console.log(`[WORKER] AUCTION_TICK_URL defaulted from NEXT_PUBLIC_APP_URL: ${defaultUrl}`);
+  }
+
+  let tickConfig;
   try {
-    supabase = createAdminClient();
-    console.log('[WORKER] Supabase admin client initialized.');
-  } catch (err: any) {
-    console.error('[WORKER] FATAL INITIALIZATION ERROR:', err.message || err);
-    process.exit(1);
+    tickConfig = getAuctionTickClientConfig();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid worker configuration.';
+    console.error(`[WORKER] FATAL INITIALIZATION ERROR: ${message}`);
+    process.exitCode = 1;
+    return;
   }
 
-  console.log(`[WORKER] Entering serialized loop. Target cadence: ${TARGET_INTERVAL_MS}ms`);
+  console.log('[WORKER] Configuration verified:');
+  console.log(`[WORKER]   - AUCTION_TICK_URL: ${tickConfig.url}`);
+  console.log(`[WORKER]   - AUCTION_TICK_SECRET: configured (${tickConfig.secret.length} characters)`);
+  console.log(`[WORKER] Authenticated tick client ready; serialized cadence ${TARGET_INTERVAL_MS}ms.`);
 
-  while (isRunning) {
-    const start = Date.now();
-    let tickError = null;
+  const exitCode = await runAuctionTickLoop({
+    tick: () => requestAuctionTick(tickConfig, undefined, { signal: controller.signal }),
+    signal: controller.signal,
+    intervalMs: TARGET_INTERVAL_MS,
+    computeDelay: (count) => retryDelayWithJitter(count),
+    onTransientError: (_error, retryCount, delayMs) => {
+      console.warn(`[WORKER] Temporary tick failure; retry ${retryCount} in ${delayMs}ms.`);
+    },
+    onFatalError: (error) => {
+      const message = error instanceof Error ? error.message : 'Unknown tick failure.';
+      console.error(`[WORKER] FATAL TICK ERROR: ${message}`);
+    },
+  });
 
-    currentTickPromise = (async () => {
-      try {
-        await executeAuctionTick(supabase);
-      } catch (err: any) {
-        tickError = err;
-      }
-    })();
-
-    await currentTickPromise;
-    currentTickPromise = null;
-
-    if (tickError) {
-      if (isRecoverableTickError(tickError)) {
-        console.error('[WORKER] TICK TRANSIENT ERROR:', tickError);
-      } else {
-        console.error('[WORKER] FATAL TICK ERROR:', tickError);
-        console.error('[WORKER] Terminating due to unknown/fatal tick error.');
-        process.exit(1);
-      }
-    }
-
-    const elapsed = Date.now() - start;
-    const delay = Math.max(0, TARGET_INTERVAL_MS - elapsed);
-    
-    // Only sleep if we're still meant to be running, to allow immediate shutdown
-    if (isRunning && delay > 0) {
-      await sleep(delay);
-    }
-  }
-
-  console.log('[WORKER] Loop terminated safely.');
+  process.exitCode = exitCode;
+  if (exitCode === 0) console.log('[WORKER] Shutdown complete.');
 }
 
-async function shutdown(signal: string) {
-  console.log(`\n[WORKER] Received ${signal}. Initiating graceful shutdown...`);
-  isRunning = false;
-
-  if (currentTickPromise) {
-    console.log('[WORKER] Waiting for current tick to finish...');
-    await currentTickPromise;
-  }
-
-  console.log('[WORKER] Graceful shutdown complete. Exiting.');
-  process.exit(0);
-}
-
-// Register handlers for graceful shutdown
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-// Start the worker
-runWorker().catch(err => {
-  console.error('[WORKER] UNEXPECTED FATAL ERROR:', err);
-  process.exit(1);
+void runWorker().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : 'Unknown worker failure.';
+  console.error(`[WORKER] UNEXPECTED FATAL ERROR: ${message}`);
+  process.exitCode = 1;
 });

@@ -4,7 +4,7 @@ console.log('[DEV-RUNNER] Starting Next.js and Auction Ticker concurrently...');
 
 const isWindows = /^win/.test(process.platform);
 const npxCmd = isWindows ? 'npx.cmd' : 'npx';
-const nodeCmd = process.execPath;
+const npmCmd = isWindows ? 'npm.cmd' : 'npm';
 
 // Start Next.js
 const nextProcess = spawn(npxCmd, ['next', 'dev', '-p', '3000'], {
@@ -12,10 +12,10 @@ const nextProcess = spawn(npxCmd, ['next', 'dev', '-p', '3000'], {
   shell: isWindows
 });
 
-// Start Auction Ticker
-const tickerProcess = spawn(nodeCmd, ['scripts/auction-ticker.js'], {
+// Start Background Worker (same entry point used in Dockerfile and production)
+const tickerProcess = spawn(npmCmd, ['run', 'worker'], {
   stdio: 'inherit',
-  shell: false
+  shell: isWindows
 });
 
 // Handle graceful termination
