@@ -5,7 +5,7 @@
 // Target environment: Node worker with ~500ms target cadence.
 // Evaluates latency for multi-bot, multi-lot scenarios with saturated pools.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { evaluateBotsForLot, AuctionContext, DEFAULT_CONTEXT, FuturePlayer } from '@/lib/auction/server-bot-engine';
 import type { V3Team, V3Player } from '@/lib/v3-auction-types';
 
@@ -66,6 +66,9 @@ describe('Bot Intelligence Performance Benchmark', () => {
     // Warmup run
     evaluateBotsForLot(bots, currentLotPlayer, 300, 200, undefined, 'Normal', bots, {}, ctx, null);
 
+    // Suppress console I/O during pure algorithm benchmarking so terminal write buffer latency is not measured
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
     // Timed benchmark across 10 iterations (representing 10 auction ticks)
     const iterations = 10;
     const start = performance.now();
@@ -73,6 +76,7 @@ describe('Bot Intelligence Performance Benchmark', () => {
       evaluateBotsForLot(bots, currentLotPlayer, 300 + i * 25, 200, bots[i % 10]!.id, 'Normal', bots, {}, ctx, null);
     }
     const elapsedMs = performance.now() - start;
+    errorSpy.mockRestore();
     const avgMsPerLot = elapsedMs / iterations;
     const avgMsPerBot = avgMsPerLot / bots.length;
 
