@@ -168,3 +168,22 @@ export function buildBotSquadState(
     roleNeeds,
   };
 }
+
+export function canBotAffordWithSquadReserve(
+  purseRemaining: number,
+  currentSquadSize: number,
+  currentOverseasCount: number,
+  candidateIsOverseas: boolean,
+  nextBidAmount: number,
+  minBasePrice: number = 20
+): { allowed: boolean; spendablePurse: number; reason?: string } {
+  if (currentSquadSize >= 25) return { allowed: false, spendablePurse: 0, reason: 'MAX_SQUAD_25_REACHED' };
+  if (candidateIsOverseas && currentOverseasCount >= 8) return { allowed: false, spendablePurse: 0, reason: 'MAX_OVERSEAS_8_REACHED' };
+  const mandatorySlotsLeft = Math.max(0, 18 - (currentSquadSize + 1));
+  const reservedPurse = mandatorySlotsLeft * minBasePrice;
+  const spendablePurse = Math.max(0, purseRemaining - reservedPurse);
+  if (nextBidAmount > spendablePurse) {
+    return { allowed: false, spendablePurse, reason: 'RESERVED_FOR_MIN_18_SQUAD' };
+  }
+  return { allowed: true, spendablePurse };
+}

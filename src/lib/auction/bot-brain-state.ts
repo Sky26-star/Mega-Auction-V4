@@ -1,4 +1,4 @@
-// src/lib/auction/bot-brain-state.ts
+﻿// src/lib/auction/bot-brain-state.ts
 //
 // Phase 1C: Bot Brain State Updater
 //
@@ -31,12 +31,12 @@ export interface BotBeliefs {
    * up relative to its base price. The field name is retained for Phase 1C
    * API stability; future phases may rename it if needed.
    *
-   * Range: 0.0 â†’ 2.0
+   * Range: 0.0 Ã¢â€ â€™ 2.0
    *   0.0 = at or below base price (no premium)
-   *   0.4 = ~3Ã— base price (moderate premium)
-   *   1.0 = ~6Ã— base price (high premium)
-   *   2.0 = â‰¥11Ã— base price (extreme premium, capped)
-   * Neutral: 0.0 (when no current bid exists or bid â‰¤ base price)
+   *   0.4 = ~3Ãƒâ€” base price (moderate premium)
+   *   1.0 = ~6Ãƒâ€” base price (high premium)
+   *   2.0 = Ã¢â€°Â¥11Ãƒâ€” base price (extreme premium, capped)
+   * Neutral: 0.0 (when no current bid exists or bid Ã¢â€°Â¤ base price)
    *
    * Uses ONLY the current lot's currentBid and basePrice.
    * Does NOT use historical sold-price data or external market data.
@@ -45,7 +45,7 @@ export interface BotBeliefs {
 
   /**
    * How urgently this bot needs the current player's role.
-   * Range: 0.0 â†’ 1.0
+   * Range: 0.0 Ã¢â€ â€™ 1.0
    *   0.0 = role is fully staffed or redundant
    *   0.5 = normal need
    *   1.0 = critical need (zero players in this role)
@@ -55,7 +55,7 @@ export interface BotBeliefs {
 
   /**
    * Estimated opponent bidding pressure on the current lot.
-   * Range: 0.0 â†’ 1.0
+   * Range: 0.0 Ã¢â€ â€™ 1.0
    *   0.0 = no rival pressure
    *   0.5 = moderate
    *   1.0 = extreme multi-rival contention
@@ -65,7 +65,7 @@ export interface BotBeliefs {
 
   /**
    * Estimate of the bot's current squad quality from its roster.
-   * Range: 0.0 â†’ 1.0
+   * Range: 0.0 Ã¢â€ â€™ 1.0
    *   0.0 = empty squad or all minimum-rated players
    *   0.5 = average quality
    *   1.0 = all elite-rated players
@@ -85,7 +85,7 @@ export type StrategicFocus =
   | 'LATE_AUCTION';   // Endgame bargain hunting
 
 /**
- * Strategic reservation estimate â€” what the bot THINKS it should preserve
+ * Strategic reservation estimate Ã¢â‚¬â€ what the bot THINKS it should preserve
  * for critical future role needs.
  *
  * THIS IS NOT AUTHORITATIVE PURSE ACCOUNTING.
@@ -104,24 +104,24 @@ export type StrategicFocus =
  * Those belong to later phases, NOT Phase 1C.
  */
 export interface BudgetAllocation {
-  /** Total remaining purse (mirrors authoritative V3Team.purse â€” read-only) */
+  /** Total remaining purse (mirrors authoritative V3Team.purse Ã¢â‚¬â€ read-only) */
   readonly totalRemaining: number;
   /** Estimated strategic reserve for remaining critical/high role needs */
   readonly reserveForCriticalNeeds: number;
   /** Estimated discretionary budget (purse minus strategic reserve) */
   readonly discretionaryBudget: number;
-  /** Ratio of purse already spent (0.0 â†’ 1.0) */
+  /** Ratio of purse already spent (0.0 Ã¢â€ â€™ 1.0) */
   readonly spentRatio: number;
 }
 
 /**
  * BotPlan: The bot's strategic intentions derived from beliefs + state.
- * THIS IS ADVISORY ONLY â€” it does not override the tactical engine.
+ * THIS IS ADVISORY ONLY Ã¢â‚¬â€ it does not override the tactical engine.
  */
 export interface BotPlan {
   /**
    * Overall urgency to acquire players.
-   * Range: 0.0 â†’ 1.0
+   * Range: 0.0 Ã¢â€ â€™ 1.0
    *   0.0 = no urgency, comfortable position
    *   0.5 = moderate
    *   1.0 = desperate, must buy soon
@@ -158,7 +158,7 @@ export interface BotBrainState {
  * Compute current-lot market price pressure (see BotBeliefs.marketInflation).
  *
  * This measures the CURRENT lot's price premium relative to its base price.
- * It is NOT a historical market inflation rate â€” it uses only the current
+ * It is NOT a historical market inflation rate Ã¢â‚¬â€ it uses only the current
  * lot's currentBid and basePrice, which are observable right now.
  *
  * Formula:
@@ -166,11 +166,11 @@ export interface BotBrainState {
  *   pressure = clamp((ratio - 1) / 5, 0, 2)
  *
  * At base price (ratio=1): pressure = 0.0
- * At 3Ã— base  (ratio=3):  pressure = 0.4
- * At 6Ã— base  (ratio=6):  pressure = 1.0
- * At 11Ã— base (ratio=11): pressure = 2.0 (capped)
+ * At 3Ãƒâ€” base  (ratio=3):  pressure = 0.4
+ * At 6Ãƒâ€” base  (ratio=6):  pressure = 1.0
+ * At 11Ãƒâ€” base (ratio=11): pressure = 2.0 (capped)
  *
- * Returns neutral 0.0 when no current bid exists or bid â‰¤ base price.
+ * Returns neutral 0.0 when no current bid exists or bid Ã¢â€°Â¤ base price.
  */
 function computeMarketInflation(currentBid: number, basePrice: number): number {
   if (basePrice <= 0 || currentBid <= 0) return 0.0;
@@ -183,11 +183,11 @@ function computeMarketInflation(currentBid: number, basePrice: number): number {
  * Uses the existing getRoleNeed() from server-bot-engine as the authority on role needs.
  *
  * Mapping from RoleNeed to panic:
- *   CRITICAL  â†’ 1.0
- *   HIGH      â†’ 0.7
- *   NORMAL    â†’ 0.3
- *   LOW       â†’ 0.1
- *   REDUNDANT â†’ 0.0
+ *   CRITICAL  Ã¢â€ â€™ 1.0
+ *   HIGH      Ã¢â€ â€™ 0.7
+ *   NORMAL    Ã¢â€ â€™ 0.3
+ *   LOW       Ã¢â€ â€™ 0.1
+ *   REDUNDANT Ã¢â€ â€™ 0.0
  */
 function computeRoleScarcityPanic(
   playerRole: string,
@@ -271,13 +271,13 @@ function computeRivalAggression(
  *   average the category-based quality estimate for owned players.
  *
  * We do NOT call computePlayerRating here to avoid importing player-rating.ts
- * and to keep this lightweight. Instead we use the same categoryâ†’quality mapping
+ * and to keep this lightweight. Instead we use the same categoryÃ¢â€ â€™quality mapping
  * that the existing bot engine uses (estimateQualityFromCategory).
  *
- * Quality is normalized: (avgRating - 74) / 24  â†’  0.0 to 1.0
+ * Quality is normalized: (avgRating - 74) / 24  Ã¢â€ â€™  0.0 to 1.0
  * where 74 is the rating floor and 98 is the ceiling per player-rating.ts.
  *
- * Empty roster â†’ 0.0
+ * Empty roster Ã¢â€ â€™ 0.0
  */
 function computeEstimatedSquadQuality(botRoster: V3Player[]): number {
   if (botRoster.length === 0) return 0.0;
@@ -288,12 +288,12 @@ function computeEstimatedSquadQuality(botRoster: V3Player[]): number {
   }
   const avgRating = totalEst / botRoster.length;
 
-  // Normalize to 0.0â€“1.0 range (rating system bounds: 74â€“98)
+  // Normalize to 0.0Ã¢â‚¬â€œ1.0 range (rating system bounds: 74Ã¢â‚¬â€œ98)
   return Math.min(1.0, Math.max(0.0, (avgRating - 74) / 24));
 }
 
 /**
- * Local copy of the categoryâ†’quality mapping from server-bot-engine.ts.
+ * Local copy of the categoryÃ¢â€ â€™quality mapping from server-bot-engine.ts.
  * We duplicate this small lookup to avoid adding a dependency on a function
  * that the instructions say not to import from (keeping server-bot-engine untouched).
  */
@@ -315,7 +315,7 @@ function estimateQualityFromCategoryLocal(category: string): number {
  * Compute urgency from memory, beliefs, and squad state.
  *
  * Factors:
- *   - lotsSinceLastPurchase: more lots without buying â†’ more urgent
+ *   - lotsSinceLastPurchase: more lots without buying Ã¢â€ â€™ more urgent
  *   - remaining squad slots vs auction progress
  *   - roleScarcityPanic: critical needs amplify urgency
  *   - failedTargets count: losing targets increases desperation
@@ -355,12 +355,12 @@ function computeUrgency(
  * reserveForCriticalNeeds:
  *   Estimated minimum cost to fill unfilled critical/high roles.
  *   Uses futureMinBasePrice as a conservative floor per needed slot.
- *   This is a rough heuristic â€” NOT a full budget planner.
+ *   This is a rough heuristic Ã¢â‚¬â€ NOT a full budget planner.
  *
  * discretionaryBudget:
  *   purse minus the strategic reserve estimate.
  *
- * IMPORTANT â€” NON-AUTHORITATIVE:
+ * IMPORTANT Ã¢â‚¬â€ NON-AUTHORITATIVE:
  * This calculation is purely advisory. It MUST NEVER override:
  *   - actual purse validation (V3Team.purse is authoritative)
  *   - minimum bid or bid increment rules
@@ -413,11 +413,11 @@ function computeBudgetAllocation(
  * Determine strategic focus from auction state and beliefs.
  *
  * Logic (deterministic, checked in order):
- *   1. auctionProgress > 0.80               â†’ LATE_AUCTION
- *   2. spentRatio > 0.70 and urgency < 0.5  â†’ PROTECT_PURSE
- *   3. roleScarcityPanic >= 0.7             â†’ FILL_GAPS
- *   4. marketInflation < 0.2 and urgency < 0.4 â†’ TARGET_VALUE
- *   5. default                               â†’ BUILD_CORE
+ *   1. auctionProgress > 0.80               Ã¢â€ â€™ LATE_AUCTION
+ *   2. spentRatio > 0.70 and urgency < 0.5  Ã¢â€ â€™ PROTECT_PURSE
+ *   3. roleScarcityPanic >= 0.7             Ã¢â€ â€™ FILL_GAPS
+ *   4. marketInflation < 0.2 and urgency < 0.4 Ã¢â€ â€™ TARGET_VALUE
+ *   5. default                               Ã¢â€ â€™ BUILD_CORE
  */
 function computeStrategicFocus(
   beliefs: BotBeliefs,
@@ -475,13 +475,13 @@ export interface BotBrainStateInput {
 // ============================================================
 //
 // Authoritative in-memory cache for the LATEST BotBrainState snapshot
-// per auction + team. This is NOT a history system â€” each update
+// per auction + team. This is NOT a history system Ã¢â‚¬â€ each update
 // REPLACES the previous snapshot entirely.
 //
 // State ownership:
-//   PAST EVENTS        â†’ BotMemory (bot-brain-memory.ts)
-//   CURRENT BELIEFS    â†’ BotBrainState.beliefs (this cache)
-//   CURRENT PLAN       â†’ BotBrainState.plan (this cache)
+//   PAST EVENTS        Ã¢â€ â€™ BotMemory (bot-brain-memory.ts)
+//   CURRENT BELIEFS    Ã¢â€ â€™ BotBrainState.beliefs (this cache)
+//   CURRENT PLAN       Ã¢â€ â€™ BotBrainState.plan (this cache)
 //
 // Do NOT copy BotMemory arrays into this cache.
 // Do NOT create separate caches for beliefs, plans, purchases, etc.
@@ -489,8 +489,13 @@ export interface BotBrainStateInput {
 // Cleanup uses the same auction lifecycle boundary as BotMemory.
 // ============================================================
 
-/** Cache key: "auctionId_teamId" â†’ latest frozen BotBrainState */
-const brainStateCache = new Map<string, Readonly<BotBrainState>>();
+/** Cache key: "auctionId_teamId" Ã¢â€ â€™ latest frozen BotBrainState */
+const globalForBotBrainState = globalThis as unknown as {
+  __BOT_BRAIN_STATE_CACHE__: Map<string, Readonly<BotBrainState>>;
+};
+
+const brainStateCache = globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__ || new Map<string, Readonly<BotBrainState>>();
+globalForBotBrainState.__BOT_BRAIN_STATE_CACHE__ = brainStateCache;
 
 function brainStateCacheKey(auctionId: string, teamId: string): string {
   return `${auctionId}_${teamId}`;
@@ -513,7 +518,7 @@ export function getBotBrainState(auctionId: string, teamId: string): Readonly<Bo
  * Clear cached BotBrainState entries for auctions that are no longer active.
  *
  * Uses the same cleanup boundary as clearInactiveAuctionMemory() in
- * bot-brain-memory.ts â€” any auction NOT in the provided activeAuctionIds
+ * bot-brain-memory.ts Ã¢â‚¬â€ any auction NOT in the provided activeAuctionIds
  * set has its cached state removed.
  *
  * This ensures the BotBrainState cache does not leak memory for
@@ -557,7 +562,7 @@ export function updateBotBrainState(input: BotBrainStateInput): BotBrainState {
 
   // 2. Compute next bid amount for rival analysis
   //
-  // TODO: TEMPORARY TECHNICAL DEBT â€” Local bid-increment duplication.
+  // TODO: TEMPORARY TECHNICAL DEBT Ã¢â‚¬â€ Local bid-increment duplication.
   // The authoritative bid-increment logic lives in getNextBidAmount()
   // in server-bot-engine.ts. This is a local copy used ONLY for rival
   // eligibility estimation within BotBeliefs. It is NOT an auction-rule
@@ -619,7 +624,7 @@ export function updateBotBrainState(input: BotBrainStateInput): BotBrainState {
   // 5. Cache the latest snapshot (REPLACEMENT, not accumulation).
   //    Freeze beliefs and plan (including nested budgetAllocation) so
   //    callers of getBotBrainState() cannot mutate cached strategic state.
-  //    NOTE: BotMemory is NOT frozen â€” it is owned by Phase 1B and must
+  //    NOTE: BotMemory is NOT frozen Ã¢â‚¬â€ it is owned by Phase 1B and must
   //    remain mutable through its existing memory-management functions.
   Object.freeze(beliefs);
   // budgetAllocation is already frozen via Object.freeze() in computeBudgetAllocation,
@@ -639,3 +644,6 @@ export function updateBotBrainState(input: BotBrainStateInput): BotBrainState {
  */
 export const replanBotState = updateBotBrainState;
 
+
+
+export const __globalBotCache: Record<string, any> = ((globalThis as any).__globalBotCache ??= {});

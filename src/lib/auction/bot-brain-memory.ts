@@ -1,4 +1,4 @@
-// src/lib/auction/bot-brain-memory.ts
+﻿// src/lib/auction/bot-brain-memory.ts
 
 export interface BidObservation {
   highestBid: number;
@@ -93,7 +93,7 @@ export function getBotMemory(auctionId: string, teamId: string): BotMemory {
  * Clears memory for an entire auction (e.g., when completed/cancelled).
  */
 export function clearAuctionMemory(auctionId: string): void {
-  for (const key of botMemoryCache.keys()) {
+  for (const key of Array.from(botMemoryCache.keys())) {
     if (key.startsWith(`${auctionId}_`)) {
       botMemoryCache.delete(key);
     }
@@ -104,7 +104,7 @@ export function clearAuctionMemory(auctionId: string): void {
  * Clears memory for all auctions that are no longer in the active tracked set.
  */
 export function clearInactiveAuctionMemory(activeAuctionIds: Set<string>): void {
-  for (const key of botMemoryCache.keys()) {
+  for (const key of Array.from(botMemoryCache.keys())) {
     const auctionId = key.split('_')[0] as string;
     if (auctionId && !activeAuctionIds.has(auctionId)) {
       botMemoryCache.delete(key);
@@ -256,3 +256,6 @@ export function syncBotMemoryWithState(
 
   return memory;
 }
+
+
+export const __globalBotCache: Record<string, any> = ((globalThis as any).__globalBotCache ??= {});

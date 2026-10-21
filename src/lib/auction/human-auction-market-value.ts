@@ -561,9 +561,21 @@ export function evaluatePlayerMarketValue(
   }
 
   // 7. MARKET CONDITIONS
-  // (Removed: Scarcity inflation is now exclusively handled by Phase 4 (Team Value)
-  // to avoid double-counting and to correctly align scarcity with team needs rather than
-  // universally inflating the objective market baseline.)
+  // This count is specifically the remaining pool for this player's role. It is
+  // a market-wide signal, independent of any one team's needs or purse.
+  const remainingInRole = ctx.market?.remainingRolePoolCount;
+  if (typeof remainingInRole === 'number' && Number.isFinite(remainingInRole) && remainingInRole >= 0) {
+    if (remainingInRole <= 3) {
+      marketValue *= 1.15;
+      reasons.push(`Extreme scarcity in remaining role pool (${remainingInRole} left) inflates value (+15%)`);
+    } else if (remainingInRole <= 8) {
+      marketValue *= 1.05;
+      reasons.push(`Scarcity in remaining role pool (${remainingInRole} left) inflates value (+5%)`);
+    } else if (remainingInRole >= 25) {
+      marketValue *= 0.95;
+      reasons.push(`Abundant remaining role pool (${remainingInRole} left) softens value (-5%)`);
+    }
+  }
 
   // 8. FINAL BOUNDS CHECK
   // Round to nearest 10L, floor at base price, ceiling at ₹25 Cr (2500L)

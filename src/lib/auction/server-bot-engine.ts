@@ -1,3 +1,5 @@
+﻿import { getBotBrainState } from './bot-brain-state';
+import { computeUnifiedBotSignal } from './bot-intelligence-orchestrator';
 import { V3Team, V3Player } from '../v3-auction-types';
 import { computePlayerRating } from '../player-rating';
 import { getBotIntelligenceContext, type BotIntelligenceContext } from './bot-intelligence-orchestrator';
@@ -6,8 +8,7 @@ import { buildStrategicDecisionPolicy, type StrategicDecisionPolicy } from './bo
 
 import { evaluateQAndTV } from './bot-q-engine';
 import { evaluateTacticalDecision, computeReactionDelay, getDeterministicPseudoRandom } from './bot-tactical-engine';
-import { getBotBrainState } from './bot-brain-state';
-import { recordBotBidObservation, recordRivalBidObservation } from './bot-brain-memory';
+import { recordBotBidObservation, recordRivalBidObservation, getBotMemory } from './bot-brain-memory';
 import {
   assemblePlayerContext,
   assemblePlayerQualityContext,
@@ -48,6 +49,14 @@ export type BotPersonality = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE' | 'OPPOR
 export type BotDecision = 'SKIP' | 'ENTER' | 'HESITATE' | 'DROP' | 'ONE_LAST_BID';
 export type RoleNeed = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW' | 'REDUNDANT';
 
+export interface BotBidCandidate {
+  teamId: string;
+  nextBidAmount: number;
+  delayMs: number;
+  /** True when this candidate consumes the bot's one-last-bid allowance after acceptance. */
+  isFinalBid?: boolean;
+}
+
 export interface BotDecisionEvidence {
   teamId: string;
   decision: string;
@@ -57,7 +66,7 @@ export interface BotDecisionEvidence {
   actionReason?: string;
   pacingState?: string;
 
-  // Authoritative Phase 3–7 outputs
+  // Authoritative Phase 3â€“7 outputs
   playerId?: string;
   playerName?: string;
   marketValue?: number;
@@ -98,7 +107,7 @@ export interface AuctionContext {
   // Auction progression tracking (computed from existing data, zero new DB queries)
   lotsCompleted: number;
   lotsRemaining: number;
-  auctionProgress: number;  // 0.0 → 1.0 ratio
+  auctionProgress: number;  // 0.0 â†’ 1.0 ratio
 
   // Enriched future pool analysis for opportunity cost
   futureByRoleAndQuality: Record<string, { count: number; avgEstRating: number }>;
@@ -211,14 +220,14 @@ export function getRoleNeed(
 
 // ============================================================
 // AUCTION STAGE ENGINE (Audit #11)
-// Purse-pacing advisor — NOT scripted phases
+// Purse-pacing advisor â€” NOT scripted phases
 // ============================================================
 
 
 
 // ============================================================
 // OPPORTUNITY COST ENGINE (Audit #12, #84)
-// "If I spend ₹14 Cr here, can I still fill my bowling gap?"
+// "If I spend â‚¹14 Cr here, can I still fill my bowling gap?"
 // Uses ONLY legitimate visible metadata (no hidden future stats)
 // ============================================================
 
@@ -226,7 +235,7 @@ export function getRoleNeed(
 
 // ============================================================
 // STRATEGIC IMPERFECTION ENGINE (Audit #60, #61)
-// Rare legal bounded mistakes — rational-but-suboptimal choices
+// Rare legal bounded mistakes â€” rational-but-suboptimal choices
 // Target: ~5-8% of eligible decisions
 // ============================================================
 
@@ -239,11 +248,11 @@ export function getRoleNeed(
 // STRUCTURAL GUARANTEE: Bot knowledge boundaries
 //
 // The bot sees ONLY:
-// 1. Current player on auction block — full public stats (V3Player)
-// 2. All teams' purse, roster, overseas count — public state (V3Team[])
-// 3. PENDING lots' role, category, base_price, is_overseas — public queue
+// 1. Current player on auction block â€” full public stats (V3Player)
+// 2. All teams' purse, roster, overseas count â€” public state (V3Team[])
+// 3. PENDING lots' role, category, base_price, is_overseas â€” public queue
 //    via FuturePlayer[] which contains NO stats, NO rating
-// 4. Its own personality and computed valuation — internal derivation
+// 4. Its own personality and computed valuation â€” internal derivation
 //
 // The bot NEVER sees:
 // - Player stats of future players (only role/category/price)
@@ -252,8 +261,8 @@ export function getRoleNeed(
 // - Future lot ordering beyond what's in the public queue
 //
 // Future quality is estimated ONLY from category metadata:
-//   MARQUEE/ICON → est ~88, A/ELITE → est ~85, B/PREMIER → est ~82,
-//   C/CORE → est ~79, D/RISING → est ~76
+//   MARQUEE/ICON â†’ est ~88, A/ELITE â†’ est ~85, B/PREMIER â†’ est ~82,
+//   C/CORE â†’ est ~79, D/RISING â†’ est ~76
 // This is legitimate because category is publicly visible in the queue.
 
 export function estimateQualityFromCategory(category: string): number {
@@ -322,7 +331,7 @@ export function evaluateBotsForLot(
   passedAuctionId?: string
 ) {
   const nextBidAmount = getNextBidAmount(currentBid, basePrice);
-  const validBids: { teamId: string; nextBidAmount: number; delayMs: number }[] = [];
+  const validBids: BotBidCandidate[] = [];
 
   const highestBidder = allTeams.find(t => t.id === highestBidderTeamId);
   const remainingTimerMs = timerExpiresAt ? new Date(timerExpiresAt).getTime() - Date.now() : 15000;
@@ -396,7 +405,8 @@ export function evaluateBotsForLot(
     // -------------------------------------------------------------
     // CONTROLLED RANDOM PLAYER PARTICIPATION
     // -------------------------------------------------------------
-    if (roleNeed !== 'CRITICAL' && roleNeed !== 'HIGH') {
+    let participationOptOutReason: string | undefined;
+    if (roleNeed !== 'CRITICAL' && roleNeed !== 'HIGH' && roleNeed !== 'REDUNDANT') {
       const seedStr = `${bot.id}-${player.id}-${auctionId}`;
       const rand = getDeterministicPseudoRandom(seedStr);
       let prob = 1.0;
@@ -408,8 +418,9 @@ export function evaluateBotsForLot(
       // MARQUEE and A are 1.0
 
       if (rand > prob) {
-        if (evidenceArr) evidenceArr.push({ teamId: bot.id, decision: 'PASS', valuation: 0, tv: 0, eligibilityReason: `PARTICIPATION_OPT_OUT_CAT_${cat}` });
-        continue;
+        // Keep the deterministic opt-out, but run the authoritative valuation
+        // pipeline so diagnostic evidence still includes Phase 4 commitment.
+        participationOptOutReason = `PARTICIPATION_OPT_OUT_CAT_${cat}`;
       }
     }
 
@@ -512,9 +523,17 @@ export function evaluateBotsForLot(
 
     // 6. Phase 7: Sole Strategic Action Authority
     const humanDecision = evaluateDecision(decisionCtx);
+      const unifiedSignal = computeUnifiedBotSignal({
+        humanDecisionAction: humanDecision.action,
+        humanMaxBid: humanDecision.maximumBid,
+        nextBidAmount: decisionCtx.nextRequiredBid,
+      });
+      if (!unifiedSignal.shouldBid) {
+        (humanDecision as any).action = 'PASS';
+      }
 
     // Rival observation memory recording
-    if (highestBidderTeamId && highestBidderTeamId !== bot.id && currentBid > 0) {
+    if (!participationOptOutReason && highestBidderTeamId && highestBidderTeamId !== bot.id && currentBid > 0) {
       recordRivalBidObservation(auctionId, bot.id, player.id, highestBidderTeamId, currentBid);
     }
 
@@ -570,7 +589,35 @@ export function evaluateBotsForLot(
     let decision: BotDecision = 'DROP';
     let delayMs = 0;
 
-    if (humanDecision.action === 'BID') {
+    // Tactical drop behaviors (B3 purse pacing, B6 opportunity cost / price exceeds TV, B8 rival baiting, B11 rival intimidation)
+    const isTacticalDrop = tactical?.action === 'PASS' && (
+      tactical?.reason === 'EARLY_RESOURCE_PRESERVATION' ||
+      tactical?.reason === 'RIVAL_BAIT_DROP' ||
+      tactical?.reason === 'RIVAL_INTIMIDATION' ||
+      (tactical?.reason === 'PRICE_EXCEEDS_TV' && humanDecision.action === 'BID' && nextBidAmount > (qResult?.tv ?? 0))
+    );
+    const isParticipationOptOut = Boolean(participationOptOutReason && humanDecision.action !== 'PASS');
+
+    // Repeat prevention for One-Last-Bid (B13)
+    const priorBidObs = brainState?.memory?.observedBids?.[player.id] ?? getBotMemory(auctionId, bot.id)?.observedBids?.[player.id];
+    const hasAlreadyPlacedFinalBid = priorBidObs?.isFinalBid === true;
+
+    const isOneLastBid = (humanDecision.action === 'STRETCH' || (humanDecision.action === 'BID' && tactical?.action === 'STRETCH')) && !isTacticalDrop && !isParticipationOptOut && !hasAlreadyPlacedFinalBid;
+
+    if (isOneLastBid) {
+      decision = 'ONE_LAST_BID';
+      delayMs = Math.min(
+        Math.max(1500, Math.floor(3000 * (1 - (brainState?.plan?.urgency ?? 0)))),
+        Math.max(500, remainingTimerMs - 400)
+      );
+
+      validBids.push({
+        teamId: bot.id,
+        nextBidAmount: humanDecision.bidAmount,
+        delayMs,
+        isFinalBid: true,
+      });
+    } else if (humanDecision.action === 'BID' && !isTacticalDrop && !isParticipationOptOut && !hasAlreadyPlacedFinalBid) {
       decision = 'ENTER';
       const seed = `${auctionId}_${player.id}_${bot.id}_${nextBidAmount}_${currentBid}`;
       const prng = getDeterministicPseudoRandom(seed);
@@ -581,18 +628,7 @@ export function evaluateBotsForLot(
         nextBidAmount: humanDecision.bidAmount,
         delayMs
       });
-    } else if (humanDecision.action === 'STRETCH') {
-      decision = 'ONE_LAST_BID';
-      delayMs = Math.min(
-        Math.max(1500, Math.floor(3000 * (1 - (brainState?.plan?.urgency ?? 0)))),
-        Math.max(500, remainingTimerMs - 400)
-      );
-
-      validBids.push({
-        teamId: bot.id,
-        nextBidAmount: humanDecision.bidAmount,
-        delayMs
-      });
+      recordBotBidObservation(auctionId, bot.id, player.id, humanDecision.bidAmount, false);
     } else {
       // humanDecision.action === 'PASS'
       decision = 'DROP';
@@ -602,14 +638,24 @@ export function evaluateBotsForLot(
     // Determine primary diagnostic action reason:
     // If tactical engine ran and its action agrees with Phase 7, preserve tactical reason for legacy compatibility.
     // Otherwise, authoritative Phase 7 reason explains the decision.
-    const actionReason = (tactical?.action === humanDecision.action ? tactical?.reason : undefined) ?? humanDecision.reason;
+    const actionReason = isTacticalDrop
+      ? tactical!.reason
+      : isParticipationOptOut
+      ? participationOptOutReason
+      : isOneLastBid
+      ? (tactical?.reason ?? humanDecision.reason)
+      : hasAlreadyPlacedFinalBid && (humanDecision.action === 'STRETCH' || tactical?.action === 'STRETCH')
+      ? 'FINAL_BID_ALREADY_PLACED'
+      : (tactical?.action === 'PASS' && tactical?.reason === 'PRICE_EXCEEDS_TV' && humanDecision.action === 'PASS')
+      ? 'PRICE_EXCEEDS_TV'
+      : ((tactical?.action === humanDecision.action ? tactical?.reason : undefined) ?? humanDecision.reason);
 
     if (evidenceArr) {
       evidenceArr.push({
         teamId: bot.id,
         decision,
         valuation: teamValueResult.teamValue,
-        tv: teamValueResult.teamValue,
+        tv: qResult?.tv ?? teamValueResult.teamValue,
         actionReason,
         pacingState: tactical?.pacingState,
         playerId: player.id,
@@ -623,9 +669,10 @@ export function evaluateBotsForLot(
         nextRequiredBid: nextBidAmount,
         pricePosition: pricePosResult.state,
         auctionStage,
-        finalAction: humanDecision.action,
-        bidAmount: humanDecision.action !== 'PASS' ? humanDecision.bidAmount : 0,
+        finalAction: isParticipationOptOut ? 'PASS' : humanDecision.action,
+        bidAmount: !isParticipationOptOut && humanDecision.action !== 'PASS' ? humanDecision.bidAmount : 0,
         reasons: [humanDecision.reason],
+        eligibilityReason: isParticipationOptOut ? participationOptOutReason : undefined,
         humanDecision
       });
     }
@@ -658,9 +705,6 @@ export function evaluateBotsForLot(
       brainStateAvailable: !!brainState
     };
     console.error(JSON.stringify(logObj));
-    try {
-      require('fs').appendFileSync('C:\\Users\\Palasanilavanya\\Mega-Auction-V3\\scratch\\human_auction_eval_proofs.jsonl', JSON.stringify(logObj) + '\n');
-    } catch(e) {}
   }
 
   return validBids;

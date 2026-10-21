@@ -105,12 +105,13 @@ export interface RawMarketValueInputs {
 }
 
 export function assembleMarketValueContext(inputs: RawMarketValueInputs): MarketValueContext {
+  const rolePoolCount = inputs.auctionCtx.futureByRole?.[inputs.player.role]
+    ?? inputs.auctionCtx.futurePlayers?.filter(candidate => candidate.role === inputs.player.role).length;
+
   return {
     player: assemblePlayerContext(inputs.player),
     quality: inputs.quality,
-    market: {
-      remainingRolePoolCount: inputs.auctionCtx?.futureByRole?.[inputs.player.role] || 0
-    }
+    ...(rolePoolCount === undefined ? {} : { market: { remainingRolePoolCount: rolePoolCount } })
   };
 }
 

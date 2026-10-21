@@ -163,7 +163,7 @@ export function evaluateTeamValue(ctx: TeamValueContext): TeamValueResult {
       reasons.push('Strategic Consequence: MAJOR UPGRADE. Provides a clear, major upgrade to the starting XI.');
     }
   }
-  else if (xiLevel === 'MAJOR_UPGRADE' || (xiLevel === 'USEFUL_STARTER' && (need === 'IMPORTANT' || isCriticalTarget))) {
+  else if (xiLevel === 'MAJOR_UPGRADE' || ((xiLevel === 'USEFUL_STARTER' || xiLevel === 'DEPTH') && (need === 'IMPORTANT' || isCriticalTarget))) {
     if (createsFuturePressure) {
       strategicMultiplier = 0.95;
       strategicCommitment = 'JUSTIFIED';
@@ -175,7 +175,11 @@ export function evaluateTeamValue(ctx: TeamValueContext): TeamValueResult {
     } else {
       strategicMultiplier = 1.10;
       strategicCommitment = 'JUSTIFIED';
-      reasons.push('Strategic Consequence: SOLID ADDITION. Provides a competent starter that improves the squad structure.');
+      if (xiLevel === 'DEPTH') {
+        reasons.push('Strategic Consequence: SOLID ADDITION. Provides required squad depth for an unfilled role target.');
+      } else {
+        reasons.push('Strategic Consequence: SOLID ADDITION. Provides a competent starter that improves the squad structure.');
+      }
     }
   }
   else if (xiLevel === 'USEFUL_STARTER' || xiLevel === 'DEPTH') {
@@ -210,9 +214,12 @@ export function evaluateTeamValue(ctx: TeamValueContext): TeamValueResult {
     if (category === 'MARQUEE') {
       overbidProtection = rating >= 90 ? 1.0 : (rating >= 85 ? 0.95 : 0.90);
     } else if (category === 'A') {
-      overbidProtection = rating >= 88 ? 1.0 : (rating >= 80 ? 0.95 : 0.85);
+      // Category A's canonical category-only estimate is 85; an exact baseline
+      // rating should not discount the explicit Phase 4 consequence multiplier.
+      overbidProtection = rating >= 85 ? 1.0 : (rating >= 80 ? 0.95 : 0.85);
     } else if (category === 'B') {
-      overbidProtection = rating >= 85 ? 0.95 : (rating >= 78 ? 0.85 : 0.75);
+      // Category B's canonical category-only estimate is 82.
+      overbidProtection = rating >= 82 ? 1.0 : (rating >= 78 ? 0.85 : 0.75);
     } else if (category === 'C') {
       overbidProtection = rating >= 80 ? 0.85 : (rating >= 75 ? 0.70 : 0.55);
     } else if (category === 'D') {

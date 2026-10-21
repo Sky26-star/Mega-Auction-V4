@@ -384,3 +384,57 @@ export function getCacheSize(): number {
 export function hasCachedIntelligence(teamId: string): boolean {
   return cache.has(teamId);
 }
+
+// ============================================================================
+// LIVE AUCTION INTELLIGENCE DECISION BRIDGE
+// ============================================================================
+export interface BotIntelligenceSignal {
+  shouldBid: boolean;
+  recommendedMaxBid: number;
+  confidence: number;
+  reason: string;
+}
+
+export function computeUnifiedBotSignal(params: {
+  humanDecisionAction: 'BID' | 'PASS' | string;
+  humanMaxBid: number;
+  brainMaxBid?: number;
+  brainShouldBid?: boolean;
+  strategicCeiling?: number;
+  qValue?: number;
+  qRecommendedAction?: string;
+  tacticalAction?: string;
+  tacticalConfidence?: number;
+  alignmentScore?: number;
+  nextBidAmount: number;
+}): BotIntelligenceSignal {
+  const ceilings = [params.humanMaxBid];
+  if (typeof params.brainMaxBid === 'number' && params.brainMaxBid > 0) ceilings.push(params.brainMaxBid);
+  if (typeof params.strategicCeiling === 'number' && params.strategicCeiling > 0) ceilings.push(params.strategicCeiling);
+  const effectiveCeiling = Math.min(...ceilings);
+
+  if (params.nextBidAmount > effectiveCeiling) {
+    return { shouldBid: false, recommendedMaxBid: effectiveCeiling, confidence: 0.9, reason: 'EXCEEDS_INTELLIGENCE_CEILING' };
+  }
+
+  if (params.brainShouldBid === false) {
+    return { shouldBid: false, recommendedMaxBid: effectiveCeiling, confidence: 0.85, reason: 'BRAIN_PLAN_PASS' };
+  }
+
+  if (params.tacticalAction === 'PASS' && (params.tacticalConfidence ?? 0) >= 0.75) {
+    return { shouldBid: false, recommendedMaxBid: effectiveCeiling, confidence: params.tacticalConfidence!, reason: 'TACTICAL_HIGH_CONFIDENCE_PASS' };
+  }
+
+  const strongQ = params.qRecommendedAction === 'BID' && (params.qValue ?? 0) >= 0.6;
+  const strongAlignment = (params.alignmentScore ?? 0.5) >= 0.55;
+  if (strongQ && strongAlignment) {
+    return { shouldBid: true, recommendedMaxBid: effectiveCeiling, confidence: 0.85, reason: 'Q_ENGINE_AND_ALIGNMENT_BID' };
+  }
+
+  return {
+    shouldBid: params.humanDecisionAction === 'BID' || params.humanDecisionAction === 'STRETCH',
+    recommendedMaxBid: effectiveCeiling,
+    confidence: 0.65,
+    reason: 'HEURISTIC_WITH_INTELLIGENCE_BOUNDS'
+  };
+}
