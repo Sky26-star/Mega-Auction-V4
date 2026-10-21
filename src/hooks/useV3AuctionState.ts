@@ -730,8 +730,8 @@ export function useV3AuctionState(roomId: string) {
     fetchState
   ]);
 
-  // Authoritative timer expiry watcher: when timer expires locally, ping server tick
-  // and trigger state refresh so the client never stays stuck at 0s.
+  // The authenticated server worker owns transitions. Refresh after expiry so the
+  // client reflects the worker's authoritative state without invoking a global tick.
   useEffect(() => {
     const lot = state.currentLot;
 
@@ -749,13 +749,7 @@ export function useV3AuctionState(roomId: string) {
     const remainingMs = new Date(targetTime).getTime() - Date.now();
     const timeout = setTimeout(() => {
       if (mountedRef.current) {
-        fetch('/api/auction/tick', { method: 'POST' })
-          .catch(() => { })
-          .finally(() => {
-            if (mountedRef.current) {
-              fetchState();
-            }
-          });
+        fetchState();
       }
     }, Math.max(0, remainingMs) + 300);
 
