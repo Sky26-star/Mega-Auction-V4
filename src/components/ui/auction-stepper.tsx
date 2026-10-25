@@ -16,6 +16,7 @@ interface AuctionStepperProps {
   formatDelta: (delta: number) => string;
   onChange: (newValue: number) => void;
   id?: string;
+  disabled?: boolean;
 }
 
 export function AuctionStepper({
@@ -30,6 +31,7 @@ export function AuctionStepper({
   formatDelta,
   onChange,
   id,
+  disabled = false,
 }: AuctionStepperProps) {
   const [deltaText, setDeltaText] = useState<string | null>(null);
   const prevValueRef = useRef<number>(value);
@@ -94,7 +96,7 @@ export function AuctionStepper({
         <button
           type="button"
           onClick={() => handleStep('DEC')}
-          disabled={!canDecrease}
+          disabled={disabled || !canDecrease}
           aria-label={`Decrease ${label}`}
           className="w-10 h-10 rounded-lg bg-[#141917] hover:bg-[#181E1A] active:scale-95 border border-[#2A312D] hover:border-[#C9A227]/60 text-[#F3F4F1] hover:text-[#E4B93F] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-[#141917] disabled:hover:border-[#2A312D] disabled:hover:text-[#F3F4F1] flex items-center justify-center transition-all shadow-sm"
         >
@@ -112,7 +114,7 @@ export function AuctionStepper({
         <button
           type="button"
           onClick={() => handleStep('INC')}
-          disabled={!canIncrease}
+          disabled={disabled || !canIncrease}
           aria-label={`Increase ${label}`}
           className="w-10 h-10 rounded-lg bg-[#141917] hover:bg-[#181E1A] active:scale-95 border border-[#2A312D] hover:border-[#C9A227]/60 text-[#F3F4F1] hover:text-[#E4B93F] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-[#141917] disabled:hover:border-[#2A312D] disabled:hover:text-[#F3F4F1] flex items-center justify-center transition-all shadow-sm"
         >

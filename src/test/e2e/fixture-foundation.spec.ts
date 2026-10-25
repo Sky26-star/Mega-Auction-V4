@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import { createDisposableTestUser, setupDisposableAuction, cleanupDisposableAuction } from './setup/auction-fixture';
 import type { SupabaseClient } from '@supabase/supabase-js';

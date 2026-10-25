@@ -5,9 +5,10 @@ import { Clock } from 'lucide-react';
 interface V3TimerProps {
   lot: V3AuctionLot;
   auction?: V3Auction | null;
+  compact?: boolean;
 }
 
-export function V3Timer({ lot, auction }: V3TimerProps) {
+export function V3Timer({ lot, auction, compact = false }: V3TimerProps) {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
   useEffect(() => {
@@ -66,22 +67,25 @@ export function V3Timer({ lot, auction }: V3TimerProps) {
   };
 
   return (
-    <div className={`flex flex-col items-center justify-center p-6 rounded-3xl border-2 transition-all duration-300 ${
+    <div className={`${compact
+      ? 'flex min-w-0 flex-1 flex-row items-center justify-between gap-2 rounded-xl border p-3 transition-all duration-300 sm:flex-col sm:rounded-3xl sm:border-2 sm:p-6'
+      : 'flex flex-col items-center justify-center rounded-3xl border-2 p-6 transition-all duration-300'
+    } ${compact ? 'motion-reduce:transition-none' : ''} ${
       isPaused
         ? 'bg-[#1E2522]/80 border-[#C9A227]/50 shadow-[0_0_15px_rgba(201,162,39,0.1)]'
         : isUrgent
           ? 'bg-[#B8322E]/10 border-[#B8322E] shadow-[0_0_30px_rgba(184,50,46,0.2)]'
           : 'bg-[#141917] border-[#2A312D]'
     }`}>
-      <div className="flex items-center space-x-2 mb-2">
-        <Clock className={`w-5 h-5 ${isPaused ? 'text-[#C9A227] opacity-80' : isUrgent ? 'text-[#B8322E] animate-pulse' : 'text-[#9CA6A0]'}`} />
-        <span className={`text-sm font-mono font-bold uppercase tracking-widest ${
-          isPaused ? 'text-[#C9A227] animate-pulse' : isUrgent ? 'text-[#B8322E]' : 'text-[#9CA6A0]'
+      <div className={`${compact ? 'flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:space-x-2 sm:mb-2' : 'mb-2 flex items-center space-x-2'}`}>
+        <Clock className={`h-5 w-5 ${compact ? 'shrink-0' : ''} ${isPaused ? 'text-[#C9A227] opacity-80' : isUrgent ? `text-[#B8322E] animate-pulse ${compact ? 'motion-reduce:animate-none' : ''}` : 'text-[#9CA6A0]'}`} />
+        <span className={`${compact ? 'text-[10px] min-[380px]:text-xs sm:text-sm' : 'text-sm'} font-mono font-bold uppercase tracking-widest ${
+          isPaused ? `text-[#C9A227] animate-pulse ${compact ? 'motion-reduce:animate-none' : ''}` : isUrgent ? 'text-[#B8322E]' : 'text-[#9CA6A0]'
         }`}>
           {isPaused ? 'PAUSED' : lot.status === 'GET_READY' ? 'STARTING IN' : 'TIME REMAINING'}
         </span>
       </div>
-      <div className={`text-6xl font-mono-numbers font-black ${
+      <div className={`${compact ? 'text-3xl sm:text-6xl tabular-nums' : 'text-6xl'} font-mono-numbers font-black ${
         isPaused ? 'text-[#F3F4F1] opacity-70' : isUrgent ? 'text-[#B8322E]' : 'text-[#F3F4F1]'
       }`}>
         {formatTime(secondsLeft)}

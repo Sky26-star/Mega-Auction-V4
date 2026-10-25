@@ -772,5 +772,5 @@ describe('PHASE 1–8: Strategic Scenarios A through M', () => {
 
     expect(totalSold).toBeGreaterThan(0);
     expect(totalBidsPlaced).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

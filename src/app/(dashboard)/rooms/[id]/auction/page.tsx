@@ -193,7 +193,7 @@ export default function V3AuctionPage() {
 
   if (loading || isRefreshing) {
     return (
-      <div className="min-h-screen bg-[#0B0F0D] flex flex-col items-center justify-center p-12 space-y-4">
+      <div className="min-h-screen bg-[#0B0F0D] flex flex-col items-center justify-center space-y-4 p-4 sm:p-12">
         <Loader2 className="w-10 h-10 animate-spin text-[#C9A227]" />
         <p className="text-sm font-mono-numbers text-[#9CA6A0] uppercase tracking-widest">
           SYNCING V3 AUCTION STATE...
@@ -226,12 +226,12 @@ export default function V3AuctionPage() {
   if (state.auction.status === 'LOBBY' || state.auction.status === 'READY' || state.auction.status === 'STARTING') {
     return (
       <div className="min-h-screen bg-[#0B0F0D] flex flex-col">
-        <Navbar />
+        <Navbar auctionRoom />
         <div className="flex-1 flex flex-col items-center justify-center p-6">
           <p className="text-[#9CA6A0] font-mono uppercase tracking-widest mb-4">Waiting for auction to start...</p>
           <button
             onClick={() => router.push(`/rooms/${roomId}`)}
-            className="flex items-center space-x-2 text-xs font-mono text-[#F3F4F1] bg-[#141917] border border-[#2A312D] px-4 py-2 rounded-lg hover:bg-[#1E2522]"
+            className="flex min-h-11 items-center space-x-2 rounded-lg border border-[#2A312D] bg-[#141917] px-4 py-2 text-sm font-mono text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>BACK TO LOBBY</span>
@@ -243,7 +243,7 @@ export default function V3AuctionPage() {
 
   if (isMiniAuctionActive) {
     return (
-      <div className="min-h-screen bg-[#0B0F0D] flex flex-col items-center justify-center p-12 space-y-4">
+      <div className="min-h-screen bg-[#0B0F0D] flex flex-col items-center justify-center space-y-4 p-4 sm:p-12">
         <Loader2 className="w-10 h-10 animate-spin text-[#C9A227]" />
         <p className="text-sm font-mono-numbers text-[#9CA6A0] uppercase tracking-widest">
           TRANSITIONING TO MINI AUCTION...
@@ -256,8 +256,8 @@ export default function V3AuctionPage() {
   if (state.auction.status === 'COMPLETED') {
     return (
       <div className="min-h-screen bg-[#0B0F0D] flex flex-col text-[#F3F4F1]">
-        {animation && <V3ResultAnimation animation={animation} teams={state.teams} />}
-        <Navbar />
+        {animation && <V3ResultAnimation animation={animation} teams={state.teams} responsive />}
+        <Navbar auctionRoom />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-lg mx-auto">
           <div className="w-20 h-20 rounded-full bg-[#C9A227]/10 border border-[#C9A227]/30 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(201,162,39,0.15)]">
             <Trophy className="w-10 h-10 text-[#C9A227]" />
@@ -271,13 +271,13 @@ export default function V3AuctionPage() {
           <div className="flex flex-col sm:flex-row gap-4 w-full">
             <button
               onClick={() => router.push(`/rooms/${roomId}/summary`)}
-              className="flex-1 py-3.5 px-6 rounded-xl bg-gradient-to-b from-[#C9A227] to-[#B38D1C] text-[#0B0F0D] font-mono font-bold text-sm uppercase tracking-wider hover:brightness-110 active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(201,162,39,0.25)] flex items-center justify-center space-x-2"
+              className="flex min-h-11 flex-1 items-center justify-center space-x-2 rounded-xl bg-gradient-to-b from-[#C9A227] to-[#B38D1C] px-6 py-3.5 text-sm font-mono font-bold uppercase tracking-wider text-[#0B0F0D] shadow-[0_0_20px_rgba(201,162,39,0.25)] transition-all hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F3F4F1] motion-reduce:transition-none"
             >
               <span>VIEW SUMMARY &amp; RESULTS</span>
             </button>
             <button
               onClick={() => router.push(`/rooms/${roomId}`)}
-              className="py-3.5 px-6 rounded-xl bg-[#141917] border border-[#2A312D] text-[#9CA6A0] hover:text-[#F3F4F1] hover:border-[#3A433E] font-mono text-sm uppercase tracking-wider transition-colors"
+              className="min-h-11 rounded-xl border border-[#2A312D] bg-[#141917] px-6 py-3.5 text-sm font-mono uppercase tracking-wider text-[#9CA6A0] transition-colors hover:border-[#3A433E] hover:text-[#F3F4F1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F] motion-reduce:transition-none"
             >
               Back to Lobby
             </button>
@@ -292,19 +292,19 @@ export default function V3AuctionPage() {
       {animation && (
         (() => {
           console.log(`[ TRACE 4 ] ${Date.now()} | Immediately before rendering V3ResultAnimation | lot_id: ${animation.lot.id}`);
-          return <V3ResultAnimation animation={animation} teams={state.teams} />;
+          return <V3ResultAnimation animation={animation} teams={state.teams} responsive />;
         })()
       )}
 
-      <Navbar />
+      <Navbar auctionRoom />
 
-      <main className="flex-1 flex flex-col w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 gap-5">
+      <main className="mx-auto flex min-w-0 w-full max-w-7xl flex-1 flex-col gap-5 px-4 py-5 pb-32 sm:px-6 sm:py-5 sm:pb-8 lg:px-8">
 
         {/* Navigation & Host Controls */}
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button
             onClick={() => router.push('/dashboard')}
-            className="group flex items-center space-x-2 text-xs font-mono text-[#9CA6A0] hover:text-[#C9A227] transition-colors bg-[#141917]/50 px-3 py-1.5 rounded-lg border border-transparent hover:border-[#2A312D]"
+            className="group flex min-h-11 items-center space-x-2 rounded-lg border border-transparent bg-[#141917]/50 px-3 py-2 text-sm font-mono text-[#9CA6A0] transition-colors hover:border-[#2A312D] hover:text-[#C9A227] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0F0D] sm:text-xs"
             aria-label="Back to dashboard"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
@@ -312,12 +312,12 @@ export default function V3AuctionPage() {
           </button>
 
           {isHost && (
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 sm:justify-end">
               {state.auction.status === 'IN_PROGRESS' && (
                 <button
                   onClick={handlePauseAuction}
                   disabled={actionLoading}
-                  className="group relative px-5 py-2 overflow-hidden rounded-xl bg-[#141917] border border-[#B8322E]/30 transition-all duration-300 hover:border-[#B8322E] hover:shadow-[0_0_15px_rgba(184,50,46,0.2)] disabled:opacity-50"
+                  className="group relative min-h-11 overflow-hidden rounded-xl border border-[#B8322E]/30 bg-[#141917] px-5 py-2 transition-all duration-300 hover:border-[#B8322E] hover:shadow-[0_0_15px_rgba(184,50,46,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0F0D] disabled:opacity-50 motion-reduce:transition-none"
                 >
                   <div className="absolute inset-0 w-0 bg-[#B8322E]/10 transition-all duration-300 ease-out group-hover:w-full"></div>
                   <div className="relative flex items-center space-x-2">
@@ -334,8 +334,8 @@ export default function V3AuctionPage() {
 
         {/* PAUSED OVERLAY */}
         {state.auction.status === 'PAUSED' && (
-          <div className="fixed inset-0 z-50 bg-[#0B0F0D]/70 backdrop-blur-md flex items-center justify-center p-4 transition-all duration-500">
-            <div className="bg-[#141917] border border-[#C9A227]/30 rounded-3xl p-8 max-w-lg w-full text-center shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center">
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain bg-[#0B0F0D]/70 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur-md transition-all duration-500 motion-reduce:transition-none">
+            <div className="my-auto flex max-h-full w-full max-w-lg flex-col items-center overflow-y-auto rounded-3xl border border-[#C9A227]/30 bg-[#141917] p-5 text-center shadow-[0_0_50px_rgba(0,0,0,0.5)] sm:p-8">
 
               {(() => {
                 let resumeTime: number | null = null;
@@ -350,9 +350,7 @@ export default function V3AuctionPage() {
                       <ResumingCountdown
                         targetMs={resumeTime}
                         onComplete={() => {
-                          fetch('/api/auction/tick', { method: 'POST' })
-                            .catch(() => {})
-                            .finally(() => refresh());
+                          refresh();
                         }}
                       />
                     </div>
@@ -378,7 +376,7 @@ export default function V3AuctionPage() {
                           <button
                             onClick={handleResumeAuction}
                             disabled={actionLoading}
-                            className="group relative w-full py-4 rounded-xl bg-gradient-to-b from-[#C9A227] to-[#B38D1C] text-[#0B0F0D] font-mono font-black text-xl uppercase tracking-wider transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_30px_rgba(201,162,39,0.2)] hover:shadow-[0_0_40px_rgba(201,162,39,0.4)] disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
+                          className="group relative min-h-11 w-full overflow-hidden rounded-xl bg-gradient-to-b from-[#C9A227] to-[#B38D1C] py-4 text-xl font-mono font-black uppercase tracking-wider text-[#0B0F0D] shadow-[0_0_30px_rgba(201,162,39,0.2)] transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(201,162,39,0.4)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F3F4F1] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
                           >
                             <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-500 ease-in-out"></div>
                             {actionLoading ? 'RESUMING...' : '▶ RESUME AUCTION'}
@@ -408,12 +406,12 @@ export default function V3AuctionPage() {
             Left:  Player Card (with embedded stats)
             Right: Timer + Bid Panel (auction panel)
             ═══════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
+        <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] lg:grid-cols-[minmax(0,1fr)_360px]">
 
           {/* LEFT: Player Card (includes stats via V3PlayerStats) */}
-          <div>
+          <div className="min-w-0">
             {state.currentPlayer && state.currentLot ? (
-              <V3PlayerCard player={state.currentPlayer} />
+              <V3PlayerCard player={state.currentPlayer} responsive />
             ) : (
               <div className="h-full min-h-[220px] border-2 border-dashed border-[#2A312D] rounded-2xl bg-[#141917]/50 flex items-center justify-center">
                 <span className="font-mono text-[#8B938E] uppercase tracking-widest text-sm">Waiting for next player...</span>
@@ -422,13 +420,7 @@ export default function V3AuctionPage() {
           </div>
 
           {/* RIGHT: Auction Panel — Timer + Bid Panel */}
-          <div className="flex flex-col gap-4">
-
-            {/* Timer */}
-            {state.currentLot && (
-              <V3Timer lot={state.currentLot} auction={state.auction} />
-            )}
-
+          <div className="flex min-w-0 flex-col gap-4">
             {/* Bid Panel */}
             {state.currentLot ? (
               <V3BidPanel
@@ -437,6 +429,8 @@ export default function V3AuctionPage() {
                 myTeam={myTeam}
                 auctionId={state.auction.id}
                 onBidSuccess={refresh}
+                timer={<V3Timer lot={state.currentLot} auction={state.auction} compact />}
+                responsive
               />
             ) : (
               <div className="flex-1 border-2 border-dashed border-[#2A312D] rounded-2xl bg-[#141917]/50 flex items-center justify-center py-10">
@@ -448,7 +442,7 @@ export default function V3AuctionPage() {
 
         {/* BOTTOM: Teams overview */}
         <div className="w-full pb-8">
-          <V3Teams teams={state.teams} lot={state.currentLot} />
+          <V3Teams teams={state.teams} lot={state.currentLot} responsive />
         </div>
 
       </main>

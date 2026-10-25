@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 
 test.describe('Phase 1 E2E Smoke Test', () => {

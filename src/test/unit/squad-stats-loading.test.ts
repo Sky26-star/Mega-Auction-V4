@@ -1,15 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
+import { useAuth } from '@clerk/nextjs';
 import { useV3Squad } from '@/hooks/useV3Squad';
 import { useV3Stats } from '@/hooks/useV3Stats';
 import * as clientModule from '@/lib/supabase/client';
 
+vi.mock('@clerk/nextjs', () => ({
+  useAuth: vi.fn(),
+}));
+
 describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Handling', () => {
   let mockChannel: any;
   let mockSupabase: any;
+  let authState: { isLoaded: boolean; isSignedIn: boolean; getToken: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.restoreAllMocks();
+
+    authState = {
+      isLoaded: true,
+      isSignedIn: true,
+      getToken: vi.fn().mockResolvedValue('test-supabase-token'),
+    };
+    vi.mocked(useAuth).mockImplementation(() => authState as any);
 
     mockChannel = {
       on: vi.fn().mockReturnThis(),
@@ -20,6 +33,7 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
       from: vi.fn(),
       channel: vi.fn().mockReturnValue(mockChannel),
       removeChannel: vi.fn(),
+      realtime: { setAuth: vi.fn().mockResolvedValue(undefined) },
     };
 
     vi.spyOn(clientModule, 'createClient').mockReturnValue(mockSupabase as any);
@@ -43,25 +57,90 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
       expect(mockSupabase.channel).not.toHaveBeenCalled();
     });
 
+    it('Clerk not loaded: waits without requesting protected squad data', async () => {
+      authState.isLoaded = false;
+      const { result, rerender } = renderHook(() => useV3Squad('auc-1'));
+
+      expect(result.current.loading).toBe(true);
+      expect(result.current.squadPlayers).toEqual([]);
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+      expect(mockSupabase.channel).not.toHaveBeenCalled();
+
+      mockSupabase.from.mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+        }),
+      });
+      authState = { ...authState, isLoaded: true };
+      rerender();
+
+      await waitFor(() => expect(mockSupabase.from).toHaveBeenCalledWith('squad_players'));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+    });
+
+    it('Signed out: does not request protected squad data', async () => {
+      authState.isSignedIn = false;
+      const { result } = renderHook(() => useV3Squad('auc-1'));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.squadPlayers).toEqual([]);
+      expect(result.current.error).toMatch(/authentication required/i);
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+      expect(mockSupabase.channel).not.toHaveBeenCalled();
+    });
+
+    it('Token retrieval failure: surfaces an auth error rather than an empty success', async () => {
+      authState.getToken.mockRejectedValue(new Error('provider failure with sensitive details'));
+      const { result } = renderHook(() => useV3Squad('auc-1'));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.squadPlayers).toEqual([]);
+      expect(result.current.error).toMatch(/supabase authentication token/i);
+      expect(result.current.error).not.toContain('sensitive details');
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it('Waits for the Clerk token before starting the protected squad query', async () => {
+      let resolveToken!: (token: string) => void;
+      authState.getToken.mockReturnValue(new Promise((resolve) => {
+        resolveToken = resolve;
+      }));
+      mockSupabase.from.mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
+        }),
+      });
+
+      renderHook(() => useV3Squad('auc-1'));
+
+      await waitFor(() => expect(authState.getToken).toHaveBeenCalledWith({ template: 'supabase' }));
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+
+      await act(async () => resolveToken('test-supabase-token'));
+      await waitFor(() => expect(mockSupabase.from).toHaveBeenCalledWith('squad_players'));
+    });
+
     it('Valid ID: successful fetch and loading transition', async () => {
       const mockLots = [
         {
-          id: 'lot-1',
-          winning_bid: 5000000,
-          winning_team_id: 'team-1',
+          id: 'squad-player-1',
+          lot_id: 'lot-1',
+          team_id: 'team-1',
+          purchase_price: 5000000,
           player: { id: 'p1', name: 'Virat Kohli', role: 'BATSMAN' },
         },
       ];
 
-      mockSupabase.from.mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({
-              data: mockLots,
-              error: null,
-            }),
-          }),
+      const squadSelect = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ data: mockLots, error: null }),
         }),
+      });
+
+      mockSupabase.from.mockReturnValue({
+        select: squadSelect,
       });
 
       const { result } = renderHook(() => useV3Squad('auc-1'));
@@ -74,6 +153,8 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
       expect(result.current.squadPlayers[0]?.lot_id).toBe('lot-1');
       expect(result.current.squadPlayers[0]?.winning_bid).toBe(5000000);
       expect(result.current.squadPlayers[0]?.player.name).toBe('Virat Kohli');
+      expect(squadSelect.mock.calls[0]?.[0]).toContain('purchase_price');
+      expect(squadSelect.mock.calls[0]?.[0]).not.toMatch(/\bwinning_bid\b|\bwinning_team_id\b/);
       expect(result.current.error).toBeNull();
     });
 
@@ -97,6 +178,7 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
 
       expect(result.current.squadPlayers).toEqual([]);
       expect(result.current.error).toBeNull();
+      expect(authState.getToken).toHaveBeenCalledWith({ template: 'supabase' });
     });
 
     it('Fetch errors: sets error state and settles loading to false', async () => {
@@ -129,9 +211,10 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
 
       const secondLots = [
         {
-          id: 'lot-2',
-          winning_bid: 7500000,
-          winning_team_id: 'team-2',
+          id: 'squad-player-2',
+          lot_id: 'lot-2',
+          team_id: 'team-2',
+          purchase_price: 7500000,
           player: { id: 'p2', name: 'Jasprit Bumrah', role: 'BOWLER' },
         },
       ];
@@ -169,9 +252,10 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
         resolveFirst!({
           data: [
             {
-              id: 'lot-stale',
-              winning_bid: 1000000,
-              winning_team_id: 'team-stale',
+              id: 'squad-player-stale',
+              lot_id: 'lot-stale',
+              team_id: 'team-stale',
+              purchase_price: 1000000,
               player: { id: 'p-stale', name: 'Stale Player', role: 'BATSMAN' },
             },
           ],
@@ -216,9 +300,10 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
         resolveSlow!({
           data: [
             {
-              id: 'lot-old',
-              winning_bid: 2000000,
-              winning_team_id: 'team-old',
+              id: 'squad-player-old',
+              lot_id: 'lot-old',
+              team_id: 'team-old',
+              purchase_price: 2000000,
               player: { id: 'p-old', name: 'Old Player', role: 'BATSMAN' },
             },
           ],
@@ -267,8 +352,10 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
 
       const { unmount } = renderHook(() => useV3Squad('auc-sub'));
 
-      expect(mockSupabase.channel).toHaveBeenCalledWith('v3_squad_auc-sub');
-      expect(mockChannel.subscribe).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(mockSupabase.channel).toHaveBeenCalledWith('v3_squad_auc-sub');
+        expect(mockChannel.subscribe).toHaveBeenCalled();
+      });
 
       unmount();
 

@@ -7,6 +7,7 @@ import { getUniqueBotIdentities } from './bots';
 import { normalizePurseToLakhs } from '@/lib/auction/units';
 import type {
   Room,
+  RoomPreview,
   RoomParticipant,
   Team,
   CreateRoomInput,
@@ -27,15 +28,20 @@ export function formatRpcError(message: string): string {
   if (message.includes('NOT_IN_LOBBY')) return 'The auction session has already started or completed.';
   if (message.includes('INVALID_ROOM_NAME')) return 'Room name must be between 3 and 50 characters.';
   if (message.includes('INVALID_TEAM_NAME')) return 'Team name must be between 2 and 30 characters.';
-  if (message.includes('INVALID_SHORT_NAME')) return 'Short name must be between 2 and 5 uppercase characters.';
+  if (message.includes('INVALID_SHORT_NAME')) return 'Short name must be between 2 and 5 characters.';
+  if (message.includes('INVALID_COLOR')) return 'Please choose a valid 6-digit hex color (e.g. #FF5733).';
   if (message.includes('INVALID_PURSE')) return 'Default purse must be at least 100 Lakhs/Cr.';
+  if (message.includes('DUPLICATE_SHORT_NAME') || message.includes('unique_auction_team_short_name')) return 'A team with this short code already exists in this auction room. Please choose a different code.';
   if (message.includes('unique_auction_team_name')) return 'A team with this name already exists in this auction room. Please choose a different name.';
-  if (message.includes('unique_auction_team_short_name')) return 'A team with this short code already exists in this auction room. Please choose a different code.';
   if (message.includes('rooms_code_key')) return 'A room with this code already exists. Please choose a different code.';
   if (message.includes('PLAYER_SET_UNAUTHORIZED')) return 'You do not have permission to use the selected player set.';
   if (message.includes('PLAYER_SET_NOT_FOUND')) return 'Selected player set was not found.';
   if (message.includes('NOT_TEAM_OWNER')) return 'You do not own this team.';
   if (message.includes('AUCTION_NOT_LOBBY')) return 'Team identity cannot be changed after the auction starts.';
+  if (message.includes('NOT_HOST')) return 'Only the room host can modify room settings or start the auction.';
+  if (message.includes('ROOM_STATUS_IMMUTABLE')) return 'Room settings cannot be modified once the auction has started.';
+  if (message.includes('INVALID_TIMER_DURATION')) return 'Timer duration must be between 5 and 60 seconds per lot.';
+  if (message.includes('INVALID_SQUAD_SIZE')) return 'Maximum squad size must be between 15 and 30 players.';
   if (message.includes('AUCTION_ACTIVE')) return 'Participant removal is only allowed while the auction is in LOBBY state.';
   if (message.includes('CANNOT_REMOVE_HOST')) return 'The host cannot be removed from the room.';
   if (message.includes('UNAUTHORIZED_NOT_HOST')) return 'Only the room host can provision bot opponents.';
@@ -46,6 +52,28 @@ export function formatRpcError(message: string): string {
 }
 
 export const MAX_ROOM_CODE_RETRIES = 5;
+
+async function attachHostProfiles<T extends { host_id: string }>(
+  supabase: ReturnType<typeof createClient>,
+  rooms: Array<T & { id: string }>
+): Promise<Array<T & { host_profile: Room['host_profile'] | null }>> {
+  if (rooms.length === 0) return [];
+
+  const { data, error } = await supabase
+    .rpc('get_room_public_profiles', { p_room_ids: [...new Set(rooms.map(room => room.id))] });
+  if (error) throw new Error(error.message);
+
+  const profiles = new Map<string, NonNullable<Room['host_profile']>>(
+    ((data || []) as Array<NonNullable<Room['host_profile']> & { room_id: string }>).map(profile => [
+      `${profile.room_id}:${profile.id}`,
+      profile,
+    ])
+  );
+  return rooms.map(room => ({
+    ...room,
+    host_profile: profiles.get(`${room.id}:${room.host_id}`) || null,
+  }));
+}
 
 /**
  * Checks if an error represents a PostgreSQL unique constraint violation specifically for rooms.code (rooms_code_key).
@@ -134,7 +162,6 @@ export async function getRooms(): Promise<Room[]> {
 
   let query = supabase.from('rooms').select(`
     *,
-    host_profile:profiles!rooms_host_id_fkey(id, username, display_name, avatar_url),
     auctions(id, player_set_id, player_sets(name))
   `).order('created_at', { ascending: false });
 
@@ -147,7 +174,8 @@ export async function getRooms(): Promise<Room[]> {
   const { data: roomRows, error } = await query;
   if (error) throw new Error(error.message);
 
-  return (roomRows || []).map((r: any) => {
+  const roomsWithHosts = await attachHostProfiles(supabase, (roomRows || []) as any[]);
+  return roomsWithHosts.map((r: any) => {
     const auction = Array.isArray(r.auctions) ? r.auctions[0] : (r.auctions || null);
     const playerSet = auction?.player_sets ? (Array.isArray(auction.player_sets) ? auction.player_sets[0] : auction.player_sets) : null;
     return {
@@ -167,7 +195,6 @@ export async function getRoomById(roomId: string): Promise<Room | null> {
     .from('rooms')
     .select(`
       *,
-      host_profile:profiles!rooms_host_id_fkey(id, username, display_name, avatar_url),
       auctions(id, player_set_id, player_sets(name))
     `)
     .eq('id', roomId)
@@ -178,11 +205,13 @@ export async function getRoomById(roomId: string): Promise<Room | null> {
     throw new Error(error.message);
   }
 
+  const [roomWithHost] = await attachHostProfiles(supabase, [data as any]);
+
   const auction = Array.isArray(data.auctions) ? data.auctions[0] : (data.auctions || null);
   const playerSet = auction?.player_sets ? (Array.isArray(auction.player_sets) ? auction.player_sets[0] : auction.player_sets) : null;
 
   return {
-    ...data,
+    ...roomWithHost,
     player_set_name: playerSet?.name ?? 'Default Pool',
     auction_id: auction?.id,
   };
@@ -191,31 +220,48 @@ export async function getRoomById(roomId: string): Promise<Room | null> {
 /**
  * Looks up room details by 6-character code for Room Preview step (read-only).
  */
-export async function lookupRoomByCode(code: string): Promise<Room> {
+export async function lookupRoomByCode(code: string): Promise<RoomPreview> {
   const supabase = createClient();
   const cleanCode = code.trim().toUpperCase();
 
   const { data, error } = await supabase
-    .from('rooms')
-    .select(`
-      *,
-      host_profile:profiles!rooms_host_id_fkey(id, username, display_name, avatar_url),
-      auctions(id, player_set_id, player_sets(name))
-    `)
-    .eq('code', cleanCode)
-    .single();
+    .rpc('get_room_preview_by_code', { p_code: cleanCode })
+    .maybeSingle();
 
   if (error || !data) {
-    throw new Error(`Room with code "${cleanCode}" was not found.`);
+    throw new Error('ROOM_NOT_FOUND: Room code is invalid or the room is no longer open for joining.');
   }
 
-  const auction = Array.isArray(data.auctions) ? data.auctions[0] : (data.auctions || null);
-  const playerSet = auction?.player_sets ? (Array.isArray(auction.player_sets) ? auction.player_sets[0] : auction.player_sets) : null;
+  const preview = data as unknown as {
+    room_id: string;
+    code: string;
+    name: string;
+    host_id: string;
+    status: RoomPreview['status'];
+    settings: RoomPreview['settings'];
+    player_set_name: string | null;
+    host_profile_id: string | null;
+    host_username: string | null;
+    host_display_name: string | null;
+    host_avatar_url: string | null;
+  };
 
   return {
-    ...data,
-    player_set_name: playerSet?.name ?? 'Default Pool',
-    auction_id: auction?.id,
+    id: preview.room_id,
+    code: preview.code,
+    name: preview.name,
+    host_id: preview.host_id,
+    status: preview.status,
+    settings: preview.settings,
+    player_set_name: preview.player_set_name,
+    host_profile: preview.host_profile_id
+      ? {
+          id: preview.host_profile_id,
+          username: preview.host_username || '',
+          display_name: preview.host_display_name || '',
+          avatar_url: preview.host_avatar_url,
+        }
+      : null,
   };
 }
 
@@ -373,7 +419,7 @@ export async function joinRoomWithTeam(
 /**
  * Legacy wrapper for joinRoomByCode — maps to lookupRoomByCode for backward compatibility.
  */
-export async function joinRoomByCode(code: string): Promise<Room> {
+export async function joinRoomByCode(code: string): Promise<RoomPreview> {
   return lookupRoomByCode(code);
 }
 
@@ -420,14 +466,24 @@ export async function getRoomParticipants(roomId: string): Promise<RoomParticipa
     .from('room_participants')
     .select(`
       *,
-      profile:profiles(id, username, display_name, avatar_url),
       team:teams(id, name, short_name, color)
     `)
     .eq('room_id', roomId)
     .order('created_at', { ascending: true });
 
   if (error) throw new Error(error.message);
-  return (data || []) as RoomParticipant[];
+  const participants = (data || []) as any[];
+  const { data: profiles, error: profilesError } = participants.length
+    ? await supabase
+        .rpc('get_room_public_profiles', { p_room_ids: [roomId] })
+    : { data: [], error: null };
+  if (profilesError) throw new Error(profilesError.message);
+
+  const profileMap = new Map((profiles || []).map((profile: any) => [profile.id, profile]));
+  return participants.map(participant => ({
+    ...participant,
+    profile: participant.user_id ? profileMap.get(participant.user_id) || null : null,
+  })) as RoomParticipant[];
 }
 
 /**
@@ -486,6 +542,11 @@ export async function updateRoom(roomId: string, input: UpdateRoomInput): Promis
   const profile = await getCurrentProfile();
   if (!profile) throw new Error('User must be logged in to update a room');
 
+  const trimmedName = input.name.trim();
+  if (trimmedName.length < 3 || trimmedName.length > 50) {
+    throw new Error('Room name must be between 3 and 50 characters.');
+  }
+
   const supabase = createClient();
   const existingRoom = await getRoomById(roomId);
   if (!existingRoom) throw new Error('Room not found.');
@@ -516,30 +577,51 @@ export async function updateRoom(roomId: string, input: UpdateRoomInput): Promis
     bots: updatedBots,
   };
 
-  const { error } = await supabase
-    .from('rooms')
-    .update({
-      name: input.name,
-      settings: newSettings,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', roomId)
-    .eq('host_id', profile.id);
+  // 1. Attempt atomic update_room_settings RPC
+  const { error: rpcError } = await supabase.rpc('update_room_settings', {
+    p_room_id: roomId,
+    p_room_name: trimmedName,
+    p_room_settings: newSettings,
+    p_default_purse: input.default_purse,
+    p_timer_duration_seconds: input.timer_duration_seconds,
+    p_max_squad_size: input.max_squad_size,
+    p_bots: updatedBots,
+  });
 
-  if (error) throw new Error(error.message);
+  if (rpcError) {
+    console.warn('update_room_settings RPC fallback triggered:', rpcError.message);
+    const { error: tableError } = await supabase
+      .from('rooms')
+      .update({
+        name: trimmedName,
+        settings: newSettings,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', roomId)
+      .eq('host_id', profile.id);
 
-  if (newBotCount > 0 && updatedBots.length > 0) {
+    if (tableError) throw new Error(formatRpcError(tableError.message));
+
+    if (existingRoom.auction_id) {
+      const purseLakhs = normalizePurseToLakhs(input.default_purse);
+      await supabase
+        .from('teams')
+        .update({ purse: purseLakhs, initial_purse: purseLakhs })
+        .eq('auction_id', existingRoom.auction_id);
+
+      await supabase
+        .from('auction_lots')
+        .update({ timer_duration_seconds: input.timer_duration_seconds })
+        .eq('auction_id', existingRoom.auction_id)
+        .eq('status', 'PENDING');
+    }
+
     const { error: botRpcErr } = await supabase.rpc('provision_room_bots', {
       p_room_id: roomId,
       p_bots: updatedBots,
     });
     if (botRpcErr) {
-      console.warn('Bot re-provisioning RPC failed:', botRpcErr.message);
-    }
-  } else if (newBotCount === 0) {
-    await supabase.from('room_participants').delete().eq('room_id', roomId).eq('is_bot', true);
-    if (existingRoom.auction_id) {
-      await supabase.from('teams').delete().eq('auction_id', existingRoom.auction_id).eq('is_bot', true);
+      console.warn('Bot re-provisioning fallback failed:', botRpcErr.message);
     }
   }
 

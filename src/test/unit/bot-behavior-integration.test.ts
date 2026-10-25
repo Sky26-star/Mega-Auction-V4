@@ -370,7 +370,16 @@ describe('B1–B17 Cross-Behavior Integration Gate', () => {
   // 6. B14 LATE ENTRY REVERSAL + B17 MEMORY CAPTURE / REPLANNING
   // ============================================================
   it('6. B14 Late Entry Reversal + B17 Memory: Event capture and replanning cause valid PASS -> BID reversal', () => {
-    const candidatePlayer = makePlayer('gate-reversal-p1', { base_price: 100 });
+    const candidatePlayer = makePlayer('gate-reversal-p1', {
+      category: 'A',
+      rating: 88,
+      matches: 80,
+      runs: 3000,
+      batting_average: 35,
+      strike_rate: 140,
+      boundaries: 350,
+      base_price: 100
+    });
     const bot = makeBot(botTeamAlpha, { purse: 4000, players_bought: 5, personality: 'BALANCED' } as any);
     const allTeams = [bot, { id: rivalTeamId } as V3Team];
     const existingRoster: V3Player[] = [

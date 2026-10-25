@@ -82,7 +82,14 @@ describe('Behavior B17-B: Replanning & Next-Action Consumption', () => {
   it('TEST 1 — RIVAL EVENT → REPLAN: Rival bid observation updates brain state and triggers tactical replan', () => {
     const candidatePlayer = makePlayer('p-rival-test', {
       base_price: 200,
-      category: 'B',
+      category: 'A',
+      rating: 88,
+      matches: 70,
+      runs: 2200,
+      batting_average: 34,
+      strike_rate: 138,
+      boundaries: 240,
+      highest_score: 95,
       role: 'BATSMAN'
     });
 

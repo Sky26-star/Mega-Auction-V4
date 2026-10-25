@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient as createServerClient } from '@/lib/supabase/server';
 import { evaluateBotTradeResponse } from '@/lib/trade/bot-trade-evaluator';
 import {
+  evaluateTradeFairness,
   DEFAULT_MAX_SQUAD_SIZE,
   DEFAULT_MAX_OVERSEAS,
 } from '@/lib/trade/trade-valuation-engine';
@@ -39,6 +41,7 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminClient();
+    const callerClient = await createServerClient();
 
     // 1. Resolve Clerk User identity to internal profile ID
     const { data: mapping } = await admin
@@ -78,25 +81,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (trade.status !== 'PENDING') {
-      return NextResponse.json(
-        { success: false, error: `Trade is not pending (current status: ${trade.status})` },
-        { status: 400 }
-      );
-    }
-
-    if (trade.expires_at && new Date(trade.expires_at).getTime() <= Date.now()) {
-      await admin
-        .from('trades')
-        .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
-        .eq('id', trade.id);
-
-      return NextResponse.json(
-        { success: false, error: 'Trade proposal has expired' },
-        { status: 400 }
-      );
-    }
-
     // 3. Authorize room membership and caller legitimacy
     const { data: room, error: roomErr } = await admin
       .from('rooms')
@@ -129,12 +113,41 @@ export async function POST(request: Request) {
       );
     }
 
-    // Must be either the room host or belonging to the proposer team
+    // The existing trade RPC authorizes the room host to act for bot franchises.
     const isProposerParticipant = participant?.team_id === trade.proposer_team_id;
     if (!isHost && !isProposerParticipant) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized: caller did not propose this trade' },
         { status: 403 }
+      );
+    }
+    if (!isHost && isProposerParticipant) {
+      return NextResponse.json(
+        { success: false, error: 'Only the room host can process bot franchise decisions' },
+        { status: 403 }
+      );
+    }
+
+    if (trade.status !== 'PENDING') {
+      return NextResponse.json(
+        { success: false, error: `Trade is not pending (current status: ${trade.status})` },
+        { status: 400 }
+      );
+    }
+
+    // Expiration is a state mutation, so do it only after the caller is authorized
+    // for this room. The admin client bypasses RLS and must not be reached by an
+    // authenticated user who merely knows an expired trade ID.
+    if (trade.expires_at && new Date(trade.expires_at).getTime() <= Date.now()) {
+      await admin
+        .from('trades')
+        .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
+        .eq('id', trade.id)
+        .eq('status', 'PENDING');
+
+      return NextResponse.json(
+        { success: false, error: 'Trade proposal has expired' },
+        { status: 400 }
       );
     }
 
@@ -215,7 +228,8 @@ export async function POST(request: Request) {
           response_notes: 'One or more players in proposal are no longer with their franchises',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', trade.id);
+        .eq('id', trade.id)
+        .eq('status', 'PENDING');
 
       return NextResponse.json(
         { success: false, error: 'Player ownership changed; trade proposal expired' },
@@ -257,31 +271,19 @@ export async function POST(request: Request) {
       maxOverseas,
     });
 
-    const nowIso = new Date().toISOString();
-
-    // 7. Apply decision securely
+    // 7. Apply the bot decision through the authoritative RPC lifecycle.
     if (decisionResult.decision === 'REJECT') {
-      await admin
-        .from('trades')
-        .update({
-          status: 'REJECTED',
-          response_notes: decisionResult.reason,
-          updated_at: nowIso,
-        })
-        .eq('id', trade.id);
-
-      await admin.from('trade_logs').insert({
-        trade_id: trade.id,
-        auction_id: trade.auction_id,
-        action: 'REJECTED',
-        actor_team_id: receiverTeam.id,
-        actor_user_id: null,
-        payload: {
-          reason: decisionResult.reason,
-          bot_decision: true,
-          bot_personality: botPersonality,
-        },
+      const { data, error } = await callerClient.rpc('v3_respond_trade', {
+        p_trade_id: trade.id,
+        p_action: 'REJECT',
+        p_notes: decisionResult.reason,
       });
+      if (error || !data?.success) {
+        return NextResponse.json(
+          { success: false, error: error?.message || data?.error || 'Bot rejection was not recorded' },
+          { status: 409 }
+        );
+      }
 
       return NextResponse.json({
         success: true,
@@ -291,190 +293,64 @@ export async function POST(request: Request) {
     }
 
     if (decisionResult.decision === 'COUNTER' && decisionResult.counterOffer) {
-      // Mark parent trade as COUNTERED
-      await admin
-        .from('trades')
-        .update({
-          status: 'COUNTERED',
-          response_notes: decisionResult.reason,
-          updated_at: nowIso,
-        })
-        .eq('id', trade.id);
+      const counterProposerPlayers = outgoingPlayers.filter(player =>
+        decisionResult.counterOffer!.proposerPlayerIds.includes(player.id)
+      );
+      const counterReceiverPlayers = proposerRoster.filter(player =>
+        decisionResult.counterOffer!.receiverPlayerIds.includes(player.id)
+      );
+      const counterFairness = evaluateTradeFairness({
+        proposerTeam: receiverTeam,
+        receiverTeam: proposerTeam,
+        proposerPlayers: counterProposerPlayers,
+        receiverPlayers: counterReceiverPlayers,
+        proposerRoster: botRoster,
+        receiverRoster: proposerRoster,
+        maxOverseas,
+      });
+      const { data: newTrade, error: counterErr } = await callerClient.rpc('v3_propose_trade', {
+        p_auction_id: trade.auction_id,
+        p_proposer_team_id: receiverTeam.id,
+        p_receiver_team_id: proposerTeam.id,
+        p_proposer_player_ids: decisionResult.counterOffer.proposerPlayerIds,
+        p_receiver_player_ids: decisionResult.counterOffer.receiverPlayerIds,
+        p_notes: decisionResult.counterOffer.notes,
+        p_parent_trade_id: trade.id,
+        p_fair_value: counterFairness,
+      });
 
-      // Create new trade offer from bot to proposer
-      const { data: newTrade, error: counterErr } = await admin
-        .from('trades')
-        .insert({
-          auction_id: trade.auction_id,
-          room_id: trade.room_id,
-          proposer_team_id: receiverTeam.id,
-          receiver_team_id: proposerTeam.id,
-          proposer_player_ids: decisionResult.counterOffer.proposerPlayerIds,
-          receiver_player_ids: decisionResult.counterOffer.receiverPlayerIds,
-          status: 'PENDING',
-          parent_trade_id: trade.id,
-          proposer_notes: decisionResult.counterOffer.notes,
-          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .select()
-        .single();
-
-      if (counterErr) {
-        console.error('Failed to create bot counter trade:', counterErr);
+      if (counterErr || !newTrade?.success) {
+        console.error('Failed to create bot counter trade:', counterErr || newTrade?.error);
         return NextResponse.json(
-          { success: false, error: counterErr.message },
-          { status: 500 }
+          { success: false, error: counterErr?.message || newTrade?.error || 'Bot counter-offer was not recorded' },
+          { status: 409 }
         );
       }
-
-      await admin.from('trade_logs').insert([
-        {
-          trade_id: trade.id,
-          auction_id: trade.auction_id,
-          action: 'COUNTERED',
-          actor_team_id: receiverTeam.id,
-          actor_user_id: null,
-          payload: {
-            reason: decisionResult.reason,
-            counter_trade_id: newTrade?.id,
-            bot_decision: true,
-          },
-        },
-        {
-          trade_id: newTrade.id,
-          auction_id: trade.auction_id,
-          action: 'PROPOSED',
-          actor_team_id: receiverTeam.id,
-          actor_user_id: null,
-          payload: {
-            notes: decisionResult.counterOffer.notes,
-            parent_trade_id: trade.id,
-            bot_decision: true,
-          },
-        },
-      ]);
 
       return NextResponse.json({
         success: true,
         decision: 'COUNTER',
         reason: decisionResult.counterOffer.notes,
-        counterTradeId: newTrade.id,
+        counterTradeId: newTrade.trade_id,
       });
     }
 
     if (decisionResult.decision === 'ACCEPT') {
-      // 8. Execute atomic roster transfer
-      const pCount = trade.proposer_player_ids.length;
-      const rCount = trade.receiver_player_ids.length;
-
-      const pOverseasCount = incomingPlayers.filter(p => p.is_overseas).length;
-      const rOverseasCount = outgoingPlayers.filter(p => p.is_overseas).length;
-
-      // Transfer Proposer Players -> Receiver (Bot) Team
-      const { error: pTransferErr } = await admin
-        .from('squad_players')
-        .update({ team_id: receiverTeam.id })
-        .eq('auction_id', trade.auction_id)
-        .in('player_id', trade.proposer_player_ids);
-
-      if (pTransferErr) {
-        console.error('Error transferring proposer players:', pTransferErr);
-        return NextResponse.json(
-          { success: false, error: 'Failed to transfer proposer players' },
-          { status: 500 }
-        );
-      }
-
-      // Transfer Receiver (Bot) Players -> Proposer Team
-      const { error: rTransferErr } = await admin
-        .from('squad_players')
-        .update({ team_id: proposerTeam.id })
-        .eq('auction_id', trade.auction_id)
-        .in('player_id', trade.receiver_player_ids);
-
-      if (rTransferErr) {
-        console.error('Error transferring receiver players:', rTransferErr);
-        return NextResponse.json(
-          { success: false, error: 'Failed to transfer receiver players' },
-          { status: 500 }
-        );
-      }
-
-      // Update denormalized counts on teams
-      await admin
-        .from('teams')
-        .update({
-          players_bought: (proposerTeam.players_bought || 0) - pCount + rCount,
-          overseas_count: (proposerTeam.overseas_count || 0) - pOverseasCount + rOverseasCount,
-        })
-        .eq('id', proposerTeam.id);
-
-      await admin
-        .from('teams')
-        .update({
-          players_bought: (receiverTeam.players_bought || 0) - rCount + pCount,
-          overseas_count: (receiverTeam.overseas_count || 0) - rOverseasCount + pOverseasCount,
-        })
-        .eq('id', receiverTeam.id);
-
-      // Finalize the trade
-      await admin
-        .from('trades')
-        .update({
-          status: 'ACCEPTED',
-          response_notes: decisionResult.reason,
-          finalized_at: nowIso,
-          updated_at: nowIso,
-        })
-        .eq('id', trade.id);
-
-      // Expire competing pending trades that involve any of the transferred players
-      const allTradedPlayerIds = [
-        ...trade.proposer_player_ids,
-        ...trade.receiver_player_ids,
-      ];
-
-      const { data: competingTrades } = await admin
-        .from('trades')
-        .select('id, proposer_player_ids, receiver_player_ids')
-        .eq('auction_id', trade.auction_id)
-        .eq('status', 'PENDING')
-        .neq('id', trade.id);
-
-      if (competingTrades && competingTrades.length > 0) {
-        const toExpireIds = competingTrades
-          .filter(t =>
-            t.proposer_player_ids?.some((pid: string) => allTradedPlayerIds.includes(pid)) ||
-            t.receiver_player_ids?.some((pid: string) => allTradedPlayerIds.includes(pid))
-          )
-          .map(t => t.id);
-
-        if (toExpireIds.length > 0) {
-          await admin
-            .from('trades')
-            .update({
-              status: 'EXPIRED',
-              response_notes: 'Competing trade finalized; players no longer available',
-              updated_at: nowIso,
-            })
-            .in('id', toExpireIds);
-        }
-      }
-
-      // Record audit log
-      await admin.from('trade_logs').insert({
-        trade_id: trade.id,
-        auction_id: trade.auction_id,
-        action: 'ACCEPTED',
-        actor_team_id: receiverTeam.id,
-        actor_user_id: null,
-        payload: {
-          reason: decisionResult.reason,
-          bot_decision: true,
-          transferred_proposer_players: trade.proposer_player_ids,
-          transferred_receiver_players: trade.receiver_player_ids,
-        },
+      // This is a server-evaluated bot action, not a human acceptance. The
+      // authenticated host has already been mapped and checked against the
+      // room above; use the server-only client so the RPC sees its trusted
+      // service_role identity. Never retry a rejected user RPC with privilege.
+      const { data, error } = await admin.rpc('v3_respond_bot_trade', {
+        p_trade_id: trade.id,
+        p_host_clerk_user_id: userId,
+        p_notes: decisionResult.reason,
       });
+      if (error || !data?.success) {
+        return NextResponse.json(
+          { success: false, error: error?.message || data?.error || 'Bot acceptance was not recorded' },
+          { status: 409 }
+        );
+      }
 
       return NextResponse.json({
         success: true,

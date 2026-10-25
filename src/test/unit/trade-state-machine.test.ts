@@ -247,11 +247,27 @@ describe('Trade State Machine & Unlock Condition Tests', () => {
         },
       });
 
-      if (proposal) {
-        expect(proposal.targetTeam.id).toBe(partnerTeam.id);
-        expect(proposal.offeredPlayers[0]?.role).toBe('BATSMAN');
-        expect(proposal.requestedPlayers[0]?.role).toBe('WICKET_KEEPER');
-      }
+      expect(proposal).not.toBeNull();
+      expect(proposal?.targetTeam.id).toBe(partnerTeam.id);
+      expect(proposal?.offeredPlayers[0]?.role).toBe('BATSMAN');
+      expect(proposal?.requestedPlayers[0]?.role).toBe('WICKET_KEEPER');
+      expect(proposal?.notes).toMatch(/balance WICKET_KEEPER depth/i);
+    });
+
+    it('does not generate a proposal when the bot has no role deficit', () => {
+      const balancedRoster = [
+        ...Array.from({ length: 4 }, (_, i) => dummyPlayer(`bat-${i}`, `Batter ${i}`, 'BATSMAN')),
+        ...Array.from({ length: 4 }, (_, i) => dummyPlayer(`bowl-${i}`, `Bowler ${i}`, 'BOWLER')),
+        ...Array.from({ length: 2 }, (_, i) => dummyPlayer(`ar-${i}`, `All-rounder ${i}`, 'ALL_ROUNDER')),
+        dummyPlayer('wk-0', 'Keeper', 'WICKET_KEEPER'),
+      ];
+
+      expect(generateBotTradeProposal({
+        botTeam,
+        botRoster: balancedRoster,
+        otherTeams: [humanTeam],
+        allRostersByTeamId: { [humanTeam.id]: [dummyPlayer('wk2', 'Keeper 2', 'WICKET_KEEPER')] },
+      })).toBeNull();
     });
   });
 });

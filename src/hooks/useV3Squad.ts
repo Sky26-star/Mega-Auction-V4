@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useAuth } from '@clerk/nextjs';
 import { createClient } from '@/lib/supabase/client';
 import { V3Player } from '@/lib/v3-auction-types';
 
@@ -12,11 +13,37 @@ export interface V3SquadPlayer {
 }
 
 export function useV3Squad(auctionId: string | null) {
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const [squadPlayers, setSquadPlayers] = useState<V3SquadPlayer[]>([]);
   const [loading, setLoading] = useState(Boolean(auctionId));
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = useMemo(() => createClient(), []);
+  const authRef = useRef({ isLoaded, isSignedIn, getToken });
+  authRef.current = { isLoaded, isSignedIn, getToken };
+  const getSupabaseToken = useCallback(async () => {
+    const auth = authRef.current;
+    if (!auth.isLoaded) {
+      throw new Error('Clerk authentication is not ready.');
+    }
+    if (!auth.isSignedIn) {
+      throw new Error('Authentication required to load squad data.');
+    }
+
+    try {
+      const token = await auth.getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error('Supabase authentication token is unavailable.');
+      }
+      return token;
+    } catch {
+      throw new Error('Failed to retrieve Supabase authentication token.');
+    }
+  }, []);
+
+  const supabase = useMemo(
+    () => createClient(getSupabaseToken, { requireAuth: true }),
+    [getSupabaseToken]
+  );
   const mountedRef = useRef(true);
   const fetchSeqRef = useRef(0);
 
@@ -27,10 +54,31 @@ export function useV3Squad(auctionId: string | null) {
       setError(null);
       return;
     }
+
+    if (!isLoaded) {
+      fetchSeqRef.current += 1;
+      setSquadPlayers([]);
+      setLoading(true);
+      setError(null);
+      return;
+    }
+
+    if (!isSignedIn) {
+      fetchSeqRef.current += 1;
+      setSquadPlayers([]);
+      setLoading(false);
+      setError('Authentication required to load squad data.');
+      return;
+    }
+
     const seq = ++fetchSeqRef.current;
     try {
       setLoading(true);
       setError(null);
+
+      // Verify the Clerk Supabase token before building a protected request.
+      await getSupabaseToken();
+      if (seq !== fetchSeqRef.current) return;
 
       // Query authoritative squad_players table
       let query = supabase
@@ -40,8 +88,6 @@ export function useV3Squad(auctionId: string | null) {
           lot_id,
           team_id,
           purchase_price,
-          winning_bid,
-          winning_team_id,
           player:players(*)
         `)
         .eq('auction_id', auctionId);
@@ -57,30 +103,30 @@ export function useV3Squad(auctionId: string | null) {
 
       if (fetchError) throw fetchError;
 
-      if (mountedRef.current && data) {
+      if (mountedRef.current) {
         // Map the joined data to our structured interface
-        const players: V3SquadPlayer[] = data.map((d: any) => ({
+        const players: V3SquadPlayer[] = (data || []).map((d: any) => ({
           id: d.id,
-          lot_id: d.lot_id || d.id,
-          team_id: d.team_id || d.winning_team_id,
-          winning_bid: d.purchase_price ?? d.winning_bid ?? 0,
-          winning_team_id: d.team_id || d.winning_team_id,
+          lot_id: d.lot_id,
+          team_id: d.team_id,
+          winning_bid: d.purchase_price,
+          winning_team_id: d.team_id,
           player: Array.isArray(d.player) ? d.player[0] : d.player
         }));
         setSquadPlayers(players);
       }
     } catch (err: any) {
       if (seq !== fetchSeqRef.current) return;
-      console.error('Error fetching squad data:', err);
       if (mountedRef.current) {
-        setError(err.message || 'Failed to fetch squad data');
+        setSquadPlayers([]);
+        setError(err instanceof Error ? err.message : 'Failed to fetch squad data');
       }
     } finally {
       if (mountedRef.current && seq === fetchSeqRef.current) {
         setLoading(false);
       }
     }
-  }, [auctionId, supabase]);
+  }, [auctionId, getSupabaseToken, isLoaded, isSignedIn, supabase]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -103,8 +149,11 @@ export function useV3Squad(auctionId: string | null) {
   // Realtime Subscription
   useEffect(() => {
     if (!auctionId) return;
+    if (!isLoaded || !isSignedIn) return;
 
     let refreshTimeout: NodeJS.Timeout | null = null;
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
     const triggerRefresh = () => {
       if (refreshTimeout) clearTimeout(refreshTimeout);
       refreshTimeout = setTimeout(() => {
@@ -114,33 +163,48 @@ export function useV3Squad(auctionId: string | null) {
       }, 500); // 500ms debounce
     };
 
-    const channel = supabase.channel(`v3_squad_${auctionId}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'squad_players',
-        filter: `auction_id=eq.${auctionId}`
-      }, () => {
-        triggerRefresh();
-      })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'auction_lots',
-        filter: `auction_id=eq.${auctionId}`
-      }, (payload) => {
-        const updatedLot = payload.new;
-        if (updatedLot.status === 'SOLD') {
-          triggerRefresh();
-        }
-      })
-      .subscribe();
+    const subscribe = async () => {
+      try {
+        const token = await getSupabaseToken();
+        if (cancelled) return;
+        await supabase.realtime.setAuth(token);
+        if (cancelled) return;
+
+        channel = supabase.channel(`v3_squad_${auctionId}`)
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'squad_players',
+            filter: `auction_id=eq.${auctionId}`
+          }, () => {
+            triggerRefresh();
+          })
+          .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'auction_lots',
+            filter: `auction_id=eq.${auctionId}`
+          }, (payload) => {
+            const updatedLot = payload.new;
+            if (updatedLot.status === 'SOLD') {
+              triggerRefresh();
+            }
+          })
+          .subscribe();
+      } catch {
+        // The protected roster fetch surfaces token errors to the Trade Desk.
+      }
+    };
+    void subscribe();
 
     return () => {
+      cancelled = true;
       if (refreshTimeout) clearTimeout(refreshTimeout);
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
-  }, [auctionId, fetchSquads, supabase]);
+  }, [auctionId, getSupabaseToken, isLoaded, isSignedIn, fetchSquads, supabase]);
 
   return { squadPlayers, loading, error, refresh: fetchSquads };
 }

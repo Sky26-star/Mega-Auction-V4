@@ -468,11 +468,22 @@ describe('Behavior B14: Late Entry Reversal', () => {
       maxOverseas: 8,
     };
 
+    const currentLotWithStats: V3Player & { rating?: number } = {
+      ...currentLot,
+      category: 'A',
+      rating: 88,
+      matches: 80,
+      runs: 3000,
+      batting_average: 35,
+      strike_rate: 140,
+      boundaries: 350,
+    };
+
     // --- BEFORE: Early auction with plentiful future pool ---
     const evidenceEarly: BotDecisionEvidence[] = [];
     const bidsEarly = evaluateBotsForLot(
       [botTeam],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       'other-team',
@@ -491,7 +502,7 @@ describe('Behavior B14: Late Entry Reversal', () => {
     const evidenceLate: BotDecisionEvidence[] = [];
     const bidsLate = evaluateBotsForLot(
       [botTeam],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       'other-team',

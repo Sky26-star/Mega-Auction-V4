@@ -24,7 +24,7 @@
 //   - Step 2 Bid Legality: If continuation is possible, bidAmount === nextRequiredBid.
 //     Never emit bidAmount < nextRequiredBid or bidAmount > maximumBid.maximumBid.
 //   - Step 3 Strategic Commitment Authority: Phase 4 provides strategicCommitment ('NOT_COMMITTED' | 'JUSTIFIED' | 'COMMITTED').
-//     NOT_COMMITTED -> PASS.
+//     NOT_COMMITTED normally returns PASS; Step 3 allows only the defined roster-deficit exception.
 //   - Step 4 Stretch Classification: STRETCH requires pricePosition === 'FINAL_LEGAL_STEP' AND
 //     strategicCommitment === 'COMMITTED'. Never triggered by recipes, scores, or opponent threat alone.
 //   - Step 5 Continuation Default: If nextRequiredBid <= maximumBid.maximumBid and
@@ -108,29 +108,80 @@ export const evaluateDecision: DecisionStage = (ctx: DecisionContext): HumanAuct
   const legalBidAmount = nextRequiredBid;
 
   // =========================================================================
-  // STEP 3 — STRATEGIC COMMITMENT (PHASE 4 AUTHORITY)
+  // STEP 3 — STRATEGIC COMMITMENT & ROSTER DEFICIT RELAXATION
   // =========================================================================
-  // Phase 4 owns squad consequence and strategic commitment.
-  // NOT_COMMITTED indicates the player is structurally redundant or low-impact depth
-  // that does not justify squad commitment.
+  // Phase 4 owns squad consequence and baseline strategic commitment.
+  // When commitment is NOT_COMMITTED, the player is not a primary target.
+  // However, if the bot's squad is materially incomplete (roster deficit exists),
+  // a useful non-priority player (DEPTH or USEFUL_STARTER) may be reconsidered
+  // to prevent ending the auction with empty squad slots and unspent budget,
+  // provided the acquisition is financially rational and does not compromise
+  // future critical targets.
   const commitment = teamValue.strategicCommitment;
   if (commitment === 'NOT_COMMITTED') {
-    const passDecision: HumanPassDecision = {
-      action: 'PASS',
-      playerId: player.id,
-      teamId: teamValue.teamId,
-      maximumBid: maximumBid.maximumBid,
-      teamValue: teamValue.teamValue,
-      marketValue: marketValue.marketValue,
-      reason: `Player is not strategically justified for squad acquisition (strategic commitment: NOT_COMMITTED).`,
-      factors: [
-        { kind: 'TEAM_NEED', detail: `Role need level is ${teamValue.factors.need.level}.` },
-        { kind: 'XI_IMPROVEMENT', detail: `Provides ${teamValue.factors.xiImprovement.level} XI improvement.` },
-        { kind: 'TEAM_FIT', detail: `Team fit is ${teamValue.factors.teamFit.level}.` }
-      ],
-      confidence: 1.0
-    };
-    return passDecision;
+    const need = teamValue.factors.need;
+    const xiLevel = teamValue.factors.xiImprovement.level;
+    const teamFit = teamValue.factors.teamFit.level;
+    const futurePlan = teamValue.factors.futurePlan;
+
+    const remainingSlots = need.remainingSquadSlots;
+    const currentRoleCount = need.currentRoleCount;
+    const idealRoleCount = need.idealRoleCount ?? need.requiredRoleCount;
+
+    // Check for disqualifying conditions:
+    // 1. Squad is already complete (no remaining slots to fill)
+    const isSquadComplete = remainingSlots <= 0;
+
+    // 2. Player is structurally redundant (no improvement or redundant role)
+    const isRedundant = xiLevel === 'NONE' || need.level === 'NOT_NEEDED';
+
+    // 3. Role is already saturated (already met or exceeded ideal count)
+    const isRoleSaturated = currentRoleCount >= idealRoleCount;
+
+    // 4. Structural mismatch (poor fit)
+    const isPoorFit = teamFit === 'POOR';
+
+    // 5. Jeopardizes future critical targets (expensive player while critical gaps remain)
+    const createsFuturePressure =
+      futurePlan.remainingCriticalTargets >= 2 &&
+      marketValue.marketValue > 500;
+
+    // A player is eligible for roster-deficit reconsideration IF:
+    // - Squad is incomplete (remainingSlots > 0)
+    // - Role is not saturated (currentRoleCount < idealRoleCount)
+    // - Player provides genuine utility (DEPTH or USEFUL_STARTER, not NONE)
+    // - Structural fit is not POOR
+    // - Does not create dangerous future critical budget pressure
+    const isRosterDeficitCandidate =
+      !isSquadComplete &&
+      !isRedundant &&
+      !isRoleSaturated &&
+      !isPoorFit &&
+      !createsFuturePressure &&
+      (xiLevel === 'DEPTH' || xiLevel === 'USEFUL_STARTER');
+
+    if (!isRosterDeficitCandidate) {
+      const passDecision: HumanPassDecision = {
+        action: 'PASS',
+        playerId: player.id,
+        teamId: teamValue.teamId,
+        maximumBid: maximumBid.maximumBid,
+        teamValue: teamValue.teamValue,
+        marketValue: marketValue.marketValue,
+        reason: isSquadComplete
+          ? `Squad is already complete (${remainingSlots} slots remaining). Non-priority player passed.`
+          : isRoleSaturated
+          ? `Role ${need.role} already satisfies target count (${currentRoleCount}/${idealRoleCount}). Additional depth not justified.`
+          : `Player is not strategically justified for squad acquisition (strategic commitment: NOT_COMMITTED).`,
+        factors: [
+          { kind: 'TEAM_NEED', detail: `Role need level is ${need.level} (${currentRoleCount}/${idealRoleCount} filled, ${remainingSlots} slots remaining).` },
+          { kind: 'XI_IMPROVEMENT', detail: `Provides ${xiLevel} XI improvement.` },
+          { kind: 'TEAM_FIT', detail: `Team fit is ${teamFit}.` }
+        ],
+        confidence: 1.0
+      };
+      return passDecision;
+    }
   }
 
   // =========================================================================
@@ -189,9 +240,10 @@ export const evaluateDecision: DecisionStage = (ctx: DecisionContext): HumanAuct
   // STEP 5 — NORMAL CONTINUATION (BID)
   // =========================================================================
   // Default action when nextRequiredBid <= maximumBid.maximumBid and player is
-  // strategically justified.
+  // strategically justified, including a qualified NOT_COMMITTED roster-deficit candidate.
   // - HEADROOM_REMAINS + (JUSTIFIED | COMMITTED) -> BID
   // - FINAL_LEGAL_STEP + JUSTIFIED -> BID (failed stretch fallback, never PASS)
+  // - Eligible NOT_COMMITTED roster-deficit candidate + legal price -> BID
   const bidDecision: HumanBidDecision = {
     action: 'BID',
     bidAmount: legalBidAmount,
@@ -200,7 +252,9 @@ export const evaluateDecision: DecisionStage = (ctx: DecisionContext): HumanAuct
     maximumBid: maximumBid.maximumBid,
     teamValue: teamValue.teamValue,
     marketValue: marketValue.marketValue,
-    reason: `Affordable strategic continuation within maximum rational bid (${legalBidAmount}L <= ${maximumBid.maximumBid}L, strategic commitment: ${commitment}).`,
+    reason: commitment === 'NOT_COMMITTED'
+      ? `Roster-deficit continuation: Affordable depth player reconsidered to fill incomplete squad rotation (${legalBidAmount}L <= ${maximumBid.maximumBid}L, remaining slots: ${teamValue.factors.need.remainingSquadSlots}).`
+      : `Affordable strategic continuation within maximum rational bid (${legalBidAmount}L <= ${maximumBid.maximumBid}L, strategic commitment: ${commitment}).`,
     factors: [
       {
         kind: 'PRICE_VS_MAXIMUM',

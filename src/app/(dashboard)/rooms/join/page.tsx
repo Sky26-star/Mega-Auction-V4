@@ -10,7 +10,7 @@ import { Navbar } from '@/components/layout/navbar';
 import { lookupRoomByCode, joinRoomWithTeam } from '@/lib/rooms';
 import { loadAuthoritativeRoomAuctionState } from '@/lib/auction/state-manager';
 import { joinRoomWithTeamSchema } from '@/lib/validations/room';
-import type { Room } from '@/lib/types/room';
+import type { RoomPreview } from '@/lib/types/room';
 import { RoomCodeInput } from '@/components/rooms/room-code-input';
 import { JoinRoomPreview, type VerificationState } from '@/components/rooms/join-room-preview';
 import {
@@ -35,7 +35,7 @@ function JoinRoomContent() {
 
   // Explicit 5-State Verification State Machine
   const [verificationState, setVerificationState] = useState<VerificationState>('IDLE');
-  const [previewRoom, setPreviewRoom] = useState<Room | null>(null);
+  const [previewRoom, setPreviewRoom] = useState<RoomPreview | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Asynchronous Race Condition & Stale Request Protection Refs

@@ -10,6 +10,7 @@ export interface AuctionHostControlsProps {
   isHost: boolean;
   onEditTeam?: () => void;
   onCopyInvite?: () => void;
+  onShareInvite?: () => void;
   onLeaveRoom?: () => void;
   onStartAuction?: () => void;
   onContinueAuction?: () => void;
@@ -22,6 +23,7 @@ export function AuctionHostControls({
   isHost,
   onEditTeam,
   onCopyInvite,
+  onShareInvite,
   onLeaveRoom,
   onStartAuction,
   onContinueAuction,
@@ -97,10 +99,10 @@ export function AuctionHostControls({
           </button>
         )}
 
-        {onCopyInvite && (
+        {(onShareInvite || onCopyInvite) && (
           <button
             type="button"
-            onClick={onCopyInvite}
+            onClick={onShareInvite || onCopyInvite}
             className="w-full py-2 px-3 rounded-xl bg-[#0B0F0D] hover:bg-[#181E1A] border border-[#2A312D] text-[#F3F4F1] hover:border-[#C9A227]/40 text-xs font-mono-numbers font-bold flex items-center justify-between transition-all"
           >
             <span>SHARE ROOM INVITE</span>

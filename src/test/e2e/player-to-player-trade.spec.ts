@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -7,11 +8,11 @@ import {
   cleanupDisposableAuction,
 } from './setup/auction-fixture';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseUrl = process.env.SUPABASE_TEST_URL!;
+const serviceRoleKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY!;
 
 if (!serviceRoleKey) {
-  throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for test fixture administrative seeding');
+  throw new Error('SUPABASE_TEST_SERVICE_ROLE_KEY is required for test fixture administrative seeding');
 }
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);

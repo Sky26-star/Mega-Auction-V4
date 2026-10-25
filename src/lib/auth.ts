@@ -114,7 +114,9 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 
 /**
  * Update current user's profile display_name and avatar_url.
- * Strictly adheres to RLS: auth.uid() = id. Never updates is_admin or username.
+ * The API maps Clerk identity to the internal profile id and performs the
+ * update through the caller's authenticated Supabase client/RLS. Never updates
+ * is_admin or username.
  */
 export async function updateCurrentProfile(data: ProfileUpdateInput): Promise<Profile> {
   const res = await fetch('/api/auth/me', {

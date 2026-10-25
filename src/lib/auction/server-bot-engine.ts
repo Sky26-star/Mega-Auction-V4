@@ -352,9 +352,6 @@ export function evaluateBotsForLot(
       if (evidenceArr) evidenceArr.push({ teamId: bot.id, decision: 'REJECTED_ELIGIBILITY', valuation: 0, tv: 0, eligibilityReason: 'SQUAD_FULL' });
       continue;
     }
-    if (bot.id === '4122f2b6-39f2-4ae1-b587-d4d2be6d0b92' || true) {
-      console.error(`[OVERSEAS DEBUG] Bot: ${bot.id}, player.is_overseas: ${player?.is_overseas}, bot.overseas_count: ${bot.overseas_count}, ctx.maxOverseas: ${ctx.maxOverseas}`);
-    }
     if (player?.is_overseas && bot.overseas_count >= ctx.maxOverseas) {
       console.error(JSON.stringify({ logType: 'TACTICAL_EVAL_PROOF', botId: bot.id, decision: 'REJECTED_ELIGIBILITY', reason: 'OVERSEAS_FULL', purse: bot.purse, currentBid }));
       if (evidenceArr) evidenceArr.push({ teamId: bot.id, decision: 'REJECTED_ELIGIBILITY', valuation: 0, tv: 0, eligibilityReason: 'OVERSEAS_FULL' });

@@ -1,14 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import './e2e-target-guard';
 
-// The fixture requires Supabase Anon Key and URL. 
-// For local tests, we default to standard local Supabase ports.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseAnonKey) {
-  throw new Error('Supabase Anon Key is required. Please set NEXT_PUBLIC_SUPABASE_ANON_KEY. If running locally, check your .env.local file.');
-}
+const supabaseUrl = process.env.SUPABASE_TEST_URL!;
+const supabaseAnonKey = process.env.SUPABASE_TEST_ANON_KEY!;
 
 /**
  * Creates a standard authenticated Supabase client for a disposable test user.

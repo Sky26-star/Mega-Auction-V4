@@ -171,3 +171,7 @@ yarn-error.log*
 /src/hooks/useV3AuctionState_old.ts.txt
 /supabase/migrations/20261010230917_fix_mini_confirm_clerk_identity.sql
 /supabase/CONSOLIDATED_REMOTE_MIGRATION.sql
+
+# Prevent compiled JS inside src
+src/**/*.js
+src/**/*.js.map

@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { createClient } from '@/lib/supabase/server';
 import { Navbar } from '@/components/layout/navbar';
+import { getCurrentMappedProfile } from '@/lib/auth/server-profile';
+import { verifyAdminUser } from '@/lib/admin/auth';
 
 import {
   Gavel,
@@ -48,11 +50,9 @@ export default async function DashboardPage() {
   // ------------------------------------------------------------
   // Fetch User Profile
   // ------------------------------------------------------------
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
+  const profile = await getCurrentMappedProfile();
+  if (!profile) redirect('/login');
+  const { authorized: isAdmin } = await verifyAdminUser();
 
   // ------------------------------------------------------------
   // Fetch User's Recent Rooms
@@ -61,7 +61,7 @@ export default async function DashboardPage() {
   const { data: participantData } = await supabase
     .from('room_participants')
     .select('room_id')
-    .eq('user_id', userId);
+    .eq('user_id', profile.id);
 
   const roomIds = (participantData || []).map(
     (p: { room_id: string }) => p.room_id
@@ -74,12 +74,6 @@ export default async function DashboardPage() {
     .from('rooms')
     .select(`
       *,
-      host_profile:profiles!rooms_host_id_fkey(
-        id,
-        username,
-        display_name,
-        avatar_url
-      ),
       auctions(
         id,
         status,
@@ -92,15 +86,22 @@ export default async function DashboardPage() {
 
   if (roomIds.length > 0) {
     roomsQuery = roomsQuery.or(
-      `host_id.eq.${userId},id.in.(${roomIds.join(',')})`
+      `host_id.eq.${profile.id},id.in.(${roomIds.join(',')})`
     );
   } else {
-    roomsQuery = roomsQuery.eq('host_id', userId);
+    roomsQuery = roomsQuery.eq('host_id', profile.id);
   }
 
   const { data: roomRows } = await roomsQuery;
-
-  const recentRooms = roomRows || [];
+  const roomProfileIds = [...new Set((roomRows || []).map(room => room.id).filter(Boolean))];
+  const { data: roomProfiles } = roomProfileIds.length
+    ? await supabase.rpc('get_room_public_profiles', { p_room_ids: roomProfileIds })
+    : { data: [] };
+  const hostProfileMap = new Map((roomProfiles || []).map((profile: any) => [`${profile.room_id}:${profile.id}`, profile]));
+  const recentRooms = (roomRows || []).map(room => ({
+    ...room,
+    host_profile: hostProfileMap.get(`${room.id}:${room.host_id}`) || null,
+  }));
 
   // ------------------------------------------------------------
   // Activity metrics
@@ -170,7 +171,7 @@ export default async function DashboardPage() {
                 👋
               </span>
 
-              {profile?.is_admin && (
+              {isAdmin && (
                 <Link
                   href="/admin"
                   className="px-2.5 py-0.5 rounded-full bg-[#C9A227]/15 text-[#E4B93F] border border-[#C9A227]/40 text-[10px] font-extrabold uppercase font-mono-numbers flex items-center gap-1 hover:bg-[#C9A227]/30 transition-all shadow-md"

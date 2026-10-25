@@ -10,9 +10,11 @@ interface V3BidPanelProps {
   myTeam: V3Team | null;
   auctionId: string;
   onBidSuccess?: () => void;
+  timer?: React.ReactNode;
+  responsive?: boolean;
 }
 
-export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess }: V3BidPanelProps) {
+export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess, timer, responsive = false }: V3BidPanelProps) {
   const [isBidding, setIsBidding] = useState(false);
 
   const highestBidder = teams.find((t) => t.id === lot.highest_bidder_team_id);
@@ -55,22 +57,25 @@ export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess }: V3Bi
     : Math.round(getNextMinimumBid(lot.current_bid / 100) * 100);
 
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className={responsive ? 'flex h-full min-w-0 flex-col gap-3' : 'flex h-full flex-col gap-3'}>
 
-      {/* CURRENT BID */}
-      <div className="bg-[#0F1410] border border-[#2A312D] rounded-xl p-4">
-        <p className="text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-[0.2em] mb-1.5">
+      {/* One compact mobile status strip; the same timer and bid values remain in use. */}
+      <div className={responsive ? 'sticky top-16 z-30 -mx-1 flex min-w-0 items-stretch gap-2 rounded-2xl border border-[#2A312D] bg-[#0B0F0D]/95 p-2 shadow-xl backdrop-blur sm:static sm:mx-0 sm:flex-col sm:gap-4 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-0' : ''}>
+        {responsive && timer}
+        <div className={responsive ? 'flex min-w-0 flex-1 flex-col justify-center rounded-xl border border-[#2A312D] bg-[#0F1410] p-2.5 sm:flex-none sm:p-4' : 'rounded-xl border border-[#2A312D] bg-[#0F1410] p-4'}>
+          <p className={responsive ? 'mb-1 text-[10px] font-mono font-bold uppercase tracking-[0.12em] text-[#9CA6A0] sm:mb-1.5 sm:text-[9px] sm:tracking-[0.2em]' : 'mb-1.5 text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           {lot.status === 'GET_READY' ? 'STARTING BID' : 'CURRENT BID'}
-        </p>
-        <div className="text-4xl sm:text-5xl font-mono-numbers font-black text-[#E4B93F] leading-none tabular-nums">
-          ₹{lot.current_bid.toLocaleString()}
-          <span className="text-xl text-[#E4B93F]/60 ml-1">L</span>
+          </p>
+          <div className={responsive ? 'whitespace-nowrap text-[clamp(1.25rem,6vw,2rem)] font-mono-numbers font-black leading-none tabular-nums text-[#E4B93F] sm:text-4xl lg:text-5xl' : 'text-4xl font-mono-numbers font-black leading-none tabular-nums text-[#E4B93F] sm:text-5xl'}>
+            ₹{lot.current_bid.toLocaleString()}
+            <span className={responsive ? 'ml-1 text-base text-[#E4B93F]/60 sm:text-xl' : 'ml-1 text-xl text-[#E4B93F]/60'}>L</span>
+          </div>
         </div>
       </div>
 
       {/* LEADING TEAM */}
       <div className="bg-[#0F1410] border border-[#2A312D] rounded-xl p-4">
-        <p className="text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-[0.2em] mb-1.5">
+        <p className={responsive ? 'mb-1.5 text-xs font-mono font-bold uppercase tracking-[0.12em] text-[#9CA6A0] sm:text-[9px] sm:tracking-[0.2em]' : 'mb-1.5 text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           Leading Team
         </p>
         {highestBidder ? (
@@ -91,8 +96,8 @@ export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess }: V3Bi
       </div>
 
       {/* NEXT MINIMUM BID */}
-      <div className="bg-[#141917] border border-[#2A312D]/50 rounded-xl p-3 flex justify-between items-center">
-        <span className="text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-[0.2em]">
+      <div className={responsive ? 'flex items-center justify-between rounded-xl border border-[#2A312D]/50 bg-[#141917] p-3' : 'flex items-center justify-between rounded-xl border border-[#2A312D]/50 bg-[#141917] p-3'}>
+        <span className={responsive ? 'text-xs font-mono font-bold uppercase tracking-[0.12em] text-[#9CA6A0] sm:text-[9px] sm:tracking-[0.2em]' : 'text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           Next Min Bid
         </span>
         <span className="font-mono-numbers font-bold text-lg text-[#F3F4F1]">
@@ -101,13 +106,13 @@ export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess }: V3Bi
       </div>
 
       {/* BID ACTION */}
-      <div className="mt-auto">
+      <div className={responsive ? 'fixed inset-x-0 bottom-0 z-40 border-t border-[#2A312D] bg-[#0B0F0D]/95 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-12px_30px_rgba(0,0,0,0.35)] backdrop-blur sm:static sm:mt-auto sm:border-0 sm:bg-transparent sm:px-0 sm:pt-0 sm:pb-0 sm:shadow-none sm:backdrop-blur-0' : 'mt-auto'}>
         {myTeam ? (
           lot.status === 'BIDDING' ? (
             <button
               onClick={handleBid}
               disabled={isBidding || isMyBid}
-              className={`w-full py-4 rounded-xl font-mono font-black text-lg uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 shadow-lg
+              className={`${responsive ? 'mx-auto flex min-h-11 w-full max-w-7xl items-center justify-center gap-2 rounded-xl py-3.5 font-mono text-lg font-black uppercase tracking-wider shadow-lg transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F3F4F1] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0F0D] motion-reduce:transition-none sm:py-4' : 'flex w-full items-center justify-center gap-2 rounded-xl py-4 font-mono text-lg font-black uppercase tracking-wider shadow-lg transition-all duration-200'}
                 ${isMyBid
                   ? 'bg-[#10B981]/20 border-2 border-[#10B981]/40 text-[#10B981] cursor-not-allowed'
                   : isBidding
@@ -127,17 +132,17 @@ export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess }: V3Bi
               )}
             </button>
           ) : lot.status === 'GET_READY' ? (
-            <div className="w-full py-4 rounded-xl font-mono font-black text-lg uppercase tracking-wider bg-[#1E2522] text-[#9CA6A0] border-2 border-[#2A312D] text-center flex items-center justify-center gap-2">
+            <div className={responsive ? 'mx-auto flex min-h-11 w-full max-w-7xl items-center justify-center gap-2 rounded-xl border-2 border-[#2A312D] bg-[#1E2522] py-3.5 text-center font-mono text-base font-black uppercase tracking-wider text-[#9CA6A0] sm:py-4 sm:text-lg' : 'flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#2A312D] bg-[#1E2522] py-4 text-center font-mono text-lg font-black uppercase tracking-wider text-[#9CA6A0]'}>
               <Loader2 className="w-5 h-5 animate-spin" />
               <span>GET READY...</span>
             </div>
           ) : (
-            <div className="w-full py-4 rounded-xl font-mono font-black text-lg uppercase tracking-wider bg-[#1E2522] text-[#9CA6A0] border-2 border-[#2A312D] text-center">
+            <div className={responsive ? 'mx-auto flex min-h-11 w-full max-w-7xl items-center justify-center rounded-xl border border-dashed border-[#2A312D] bg-[#1E2522] py-3.5 text-center font-mono text-sm uppercase tracking-wider text-[#9CA6A0] sm:py-4' : 'w-full rounded-xl border-2 border-[#2A312D] bg-[#1E2522] py-4 text-center font-mono text-lg font-black uppercase tracking-wider text-[#9CA6A0]'}>
               AUCTION PAUSED
             </div>
           )
         ) : (
-          <div className="w-full py-4 rounded-xl font-mono text-sm uppercase tracking-wider bg-[#1E2522] text-[#9CA6A0] border border-dashed border-[#2A312D] text-center">
+          <div className={responsive ? 'mx-auto flex min-h-11 w-full max-w-7xl items-center justify-center rounded-xl border border-dashed border-[#2A312D] bg-[#1E2522] py-3.5 text-center font-mono text-sm uppercase tracking-wider text-[#9CA6A0] sm:py-4' : 'w-full rounded-xl border border-dashed border-[#2A312D] bg-[#1E2522] py-4 text-center font-mono text-sm uppercase tracking-wider text-[#9CA6A0]'}>
             Viewing as observer
           </div>
         )}

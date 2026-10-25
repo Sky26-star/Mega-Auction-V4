@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect, Page } from '@playwright/test';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -8,8 +9,8 @@ import {
 } from './setup/auction-fixture';
 
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  process.env.SUPABASE_TEST_URL!,
+  process.env.SUPABASE_TEST_SERVICE_ROLE_KEY!
 );
 
 // Helper: authenticate test user in Playwright page

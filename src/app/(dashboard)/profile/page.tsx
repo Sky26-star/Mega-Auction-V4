@@ -1,10 +1,10 @@
 import React from 'react';
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
-import { createClient } from '@/lib/supabase/server';
 import { ProfileForm } from '@/components/auth/profile-form';
 import { Navbar } from '@/components/layout/navbar';
-import type { Profile } from '@/lib/types/auth';
+import { getCurrentMappedProfile } from '@/lib/auth/server-profile';
+import { verifyAdminUser } from '@/lib/admin/auth';
 
 export const metadata = {
   title: 'Profile Settings | Mega Auction V1',
@@ -12,28 +12,25 @@ export const metadata = {
 };
 
 export default async function ProfilePage() {
-  const supabase = await createClient();
   const { userId } = await auth();
   if (!userId) {
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
+  const profile = await getCurrentMappedProfile();
 
   if (!profile) {
     redirect('/login');
   }
+
+  const { authorized: isAdmin } = await verifyAdminUser();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <Navbar />
 
       <main className="flex-1 flex items-center justify-center p-4 sm:p-6 py-12">
-        <ProfileForm initialProfile={profile as Profile} />
+        <ProfileForm initialProfile={profile} isAdmin={isAdmin} />
       </main>
     </div>
   );

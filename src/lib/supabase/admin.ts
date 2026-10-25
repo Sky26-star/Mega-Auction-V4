@@ -1,5 +1,6 @@
 // src/lib/supabase/admin.ts
 
+import 'server-only';
 import { createClient } from '@supabase/supabase-js';
 import { getEnv } from '../env';
 

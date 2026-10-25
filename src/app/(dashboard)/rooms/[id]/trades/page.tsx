@@ -8,12 +8,17 @@ import { useV3AuctionState } from '@/hooks/useV3AuctionState';
 import { useV3Squad } from '@/hooks/useV3Squad';
 import { useV3Trades } from '@/hooks/useV3Trades';
 import { Navbar } from '@/components/layout/navbar';
+import { getCurrentProfile } from '@/lib/auth';
+import { getRoomById } from '@/lib/rooms';
 import {
   evaluateTradeFairness,
+  evaluatePlayerValueForTeam,
   validateTradeConstraints,
   DEFAULT_MAX_SQUAD_SIZE,
   DEFAULT_MAX_OVERSEAS,
 } from '@/lib/trade/trade-valuation-engine';
+import { computePlayerRating } from '@/lib/player-rating';
+import { isStaleCounterParentError } from '@/lib/trade/trade-errors';
 import type { V3Player, V3Team } from '@/lib/v3-auction-types';
 import type { TradeRecord } from '@/lib/trade/trade-types';
 import {
@@ -41,13 +46,29 @@ export default function TradeCenterPage() {
   const params = useParams();
   const router = useRouter();
   const roomId = params.id as string;
+  const [isRoomHost, setIsRoomHost] = useState(false);
 
   // 1. Live Auction and Mini State
   const { state, loading: stateLoading, error: stateError, refresh } = useV3AuctionState(roomId);
   const auctionId = state.auction?.id || null;
 
+  useEffect(() => {
+    let cancelled = false;
+    const resolveHost = async () => {
+      try {
+        const [profile, room] = await Promise.all([getCurrentProfile(), getRoomById(roomId)]);
+        if (!cancelled) setIsRoomHost(Boolean(profile && room && profile.id === room.host_id));
+      } catch (error) {
+        console.error('Failed to determine room host for bot trading:', error);
+        if (!cancelled) setIsRoomHost(false);
+      }
+    };
+    void resolveHost();
+    return () => { cancelled = true; };
+  }, [roomId]);
+
   // 2. Squad Data (authoritative squad_players)
-  const { squadPlayers, loading: squadLoading, refresh: refreshSquad } = useV3Squad(auctionId);
+  const { squadPlayers, loading: squadLoading, error: squadError, refresh: refreshSquad } = useV3Squad(auctionId);
 
   // 3. User Franchise Resolution
   const teams = useMemo(() => state.teams || [], [state.teams]);
@@ -71,6 +92,7 @@ export default function TradeCenterPage() {
     trades,
     activeTrades,
     completedTrades,
+    botProposalHistory,
     receivedOffers,
     sentOffers,
     loading: tradesLoading,
@@ -79,7 +101,6 @@ export default function TradeCenterPage() {
     refresh: refreshTrades,
     proposeTrade,
     respondTrade,
-    triggerBotResponse,
   } = useV3Trades(auctionId, selectedTeamId);
 
   // 5. Active Tab
@@ -205,6 +226,23 @@ export default function TradeCenterPage() {
     }
   };
 
+  const runBotCycle = async (tradeId?: string): Promise<{ processed: boolean; action?: string; reason?: string; error?: string }> => {
+    if (!auctionId) return { processed: false, error: 'Auction is unavailable.' };
+    try {
+      const response = await fetch('/api/trade/bot-cycle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auctionId, tradeId }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) return { processed: false, error: result.error || response.statusText };
+      await Promise.all([refreshTrades(), refreshSquad()]);
+      return result;
+    } catch (error: any) {
+      return { processed: false, error: error?.message || 'Bot trade cycle request failed.' };
+    }
+  };
+
   const handleProposeTrade = async () => {
     setFeedbackError(null);
     setFeedbackSuccess(null);
@@ -244,19 +282,19 @@ export default function TradeCenterPage() {
       setParentTradeId(null);
       setActiveTab('NEGOTIATIONS');
 
-      // If target is bot, trigger automatic evaluation after short delay
-      if (targetTeam.is_bot && res.trade_id) {
-        setTimeout(async () => {
-          const matchingTrade = trades.find(t => t.id === res.trade_id) || ({
-            id: res.trade_id,
-            receiver_team: targetTeam,
-            status: 'PENDING',
-          } as TradeRecord);
-          await triggerBotResponse(matchingTrade);
-          refreshTrades();
-          refreshSquad();
-        }, 1200);
+      // Run the same serialized decision cycle used by the host polling loop.
+      if (isRoomHost && targetTeam.is_bot && res.trade_id) {
+        const result = await runBotCycle(res.trade_id);
+        if (result.error) setFeedbackError(`Offer was submitted, but the bot decision failed: ${result.error}`);
+        else if (result.processed) setFeedbackSuccess(`Bot response processed: ${result.action || 'COUNTER'}${result.reason ? ` — ${result.reason}` : ''}`);
       }
+    } else if (parentTradeId && isStaleCounterParentError(res.error)) {
+      setParentTradeId(null);
+      setOfferedPlayerIds([]);
+      setRequestedPlayerIds([]);
+      setProposerNotes('');
+      setFeedbackError('This offer is no longer pending. Your counter-offer was not submitted, and counter mode was cleared. Refresh negotiations and select a pending offer.');
+      await refreshTrades();
     } else {
       setFeedbackError(res.error || 'Failed to submit proposal.');
     }
@@ -291,23 +329,15 @@ export default function TradeCenterPage() {
     setFeedbackError(null);
     setFeedbackSuccess(null);
 
-    const botRoster = squadPlayers
-      .filter(p => (p.team_id || p.winning_team_id) === trade.receiver_team_id)
-      .map(p => p.player)
-      .filter(Boolean);
-
-    const propRoster = squadPlayers
-      .filter(p => (p.team_id || p.winning_team_id) === trade.proposer_team_id)
-      .map(p => p.player)
-      .filter(Boolean);
-
-    const res = await triggerBotResponse(trade, botRoster, propRoster);
-    if (res.handled) {
-      setFeedbackSuccess(`Bot response processed: ${res.decision} — ${res.reason}`);
-      refreshSquad();
-      refreshTrades();
+    const result = await runBotCycle(trade.id);
+    if (result.error) {
+      setFeedbackError(`Could not process bot decision: ${result.error}`);
+    } else if (result.processed) {
+      setFeedbackSuccess(`Bot response processed: ${result.action || 'COUNTER'}${result.reason ? ` — ${result.reason}` : ''}`);
+    } else if (result.reason === 'TRADE_ALREADY_RESOLVED') {
+      setFeedbackError('This offer has already been handled. Negotiations were refreshed.');
     } else {
-      setFeedbackError(res.reason ? `Could not process bot decision: ${res.reason}` : 'Could not process bot decision.');
+      setFeedbackError('No bot decision was processed for this offer.');
     }
   };
 
@@ -493,6 +523,20 @@ export default function TradeCenterPage() {
           </div>
         )}
 
+        {(squadError || tradeError) && (
+          <div role="alert" className="mb-6 p-4 rounded-xl bg-[#B8322E]/10 border border-[#B8322E]/40 text-[#B8322E] text-sm font-mono">
+            <div className="flex items-center justify-between gap-4">
+              <span>{squadError ? `Roster data could not be loaded: ${squadError}` : `Trade data could not be loaded: ${tradeError}`}</span>
+              <button
+                onClick={() => { void Promise.all([refreshSquad(), refreshTrades()]); }}
+                className="shrink-0 underline"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Navigation Tabs */}
         <div className="flex border-b border-[#2A312D] mb-8 space-x-6">
           <button
@@ -533,7 +577,7 @@ export default function TradeCenterPage() {
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>TRADE LEDGER ({completedTrades.length})</span>
+            <span>TRADE LEDGER ({completedTrades.length + botProposalHistory.length})</span>
           </button>
         </div>
 
@@ -653,8 +697,11 @@ export default function TradeCenterPage() {
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] font-mono text-[#9CA6A0]">
-                              {player.role} • Base ₹{player.base_price}L
+                            <span className="block text-[10px] font-mono text-[#9CA6A0]">
+                              {player.role} • Rating {computePlayerRating(player)} • Trade value {evaluatePlayerValueForTeam(player, currentTeamRoster, currentTeam?.overseas_count || 0)} pts
+                            </span>
+                            <span className="block text-[9px] font-mono text-[#9CA6A0]/80">
+                              {[player.matches != null ? `${player.matches} matches` : null, player.runs != null ? `${player.runs} runs` : null, player.wickets != null ? `${player.wickets} wickets` : null, `Base ₹${player.base_price}L`].filter(Boolean).join(' • ')}
                             </span>
                           </div>
 
@@ -857,8 +904,11 @@ export default function TradeCenterPage() {
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] font-mono text-[#9CA6A0]">
-                              {player.role} • Base ₹{player.base_price}L
+                            <span className="block text-[10px] font-mono text-[#9CA6A0]">
+                              {player.role} • Rating {computePlayerRating(player)} • Trade value {evaluatePlayerValueForTeam(player, targetTeamRoster, targetTeam?.overseas_count || 0)} pts
+                            </span>
+                            <span className="block text-[9px] font-mono text-[#9CA6A0]/80">
+                              {[player.matches != null ? `${player.matches} matches` : null, player.runs != null ? `${player.runs} runs` : null, player.wickets != null ? `${player.wickets} wickets` : null, `Base ₹${player.base_price}L`].filter(Boolean).join(' • ')}
                             </span>
                           </div>
 
@@ -1067,7 +1117,47 @@ export default function TradeCenterPage() {
         {/* TAB 3: TRADE LEDGER (HISTORY) */}
         {activeTab === 'LEDGER' && (
           <div className="space-y-4 animate-in fade-in duration-300">
-            <h2 className="text-lg font-bold uppercase tracking-wide">Finalized Trade Log</h2>
+            <h2 className="text-lg font-bold uppercase tracking-wide">Bot-to-Bot Proposal History</h2>
+
+            {botProposalHistory.length === 0 ? (
+              <div className="bg-[#141917] border border-[#2A312D] rounded-2xl p-8 text-center text-xs font-mono text-[#9CA6A0]">
+                No bot-to-bot proposals in trade history.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {botProposalHistory.map(trade => (
+                  <div key={trade.id} className="p-4 rounded-xl border bg-[#141917] border-[#2A312D] flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#C9A227]/10 text-[#C9A227] border border-[#C9A227]/30">
+                        {trade.status}
+                      </span>
+                      <span className="text-xs font-bold">
+                        {trade.proposer_team?.name} → {trade.receiver_team?.name}
+                      </span>
+                      {trade.parent_trade_id && (
+                        <span className="text-[10px] font-mono text-[#9CA6A0]">
+                          Counter to #{trade.parent_trade_id.slice(0, 8)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs font-mono text-[#9CA6A0] flex flex-wrap gap-x-4">
+                      <span>Gives: {trade.proposer_players?.map(player => player.name).join(', ')}</span>
+                      <span>Requests: {trade.receiver_players?.map(player => player.name).join(', ')}</span>
+                    </div>
+                    {(trade.proposer_notes || trade.response_notes) && (
+                      <p className="text-xs text-[#9CA6A0]">
+                        {[trade.proposer_notes, trade.response_notes].filter(Boolean).join(' — ')}
+                      </p>
+                    )}
+                    <span className="text-[10px] font-mono text-[#9CA6A0]">
+                      Updated {new Date(trade.updated_at).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <h2 className="pt-6 text-lg font-bold uppercase tracking-wide">Completed Trade Ledger</h2>
 
             {completedTrades.length === 0 ? (
               <div className="bg-[#141917] border border-[#2A312D] rounded-2xl p-12 text-center text-xs font-mono text-[#9CA6A0]">

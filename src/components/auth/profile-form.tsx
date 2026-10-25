@@ -9,9 +9,10 @@ import { User, Image as ImageIcon, CheckCircle2, AlertCircle, Loader2, ShieldChe
 
 interface ProfileFormProps {
   initialProfile: Profile;
+  isAdmin: boolean;
 }
 
-export function ProfileForm({ initialProfile }: ProfileFormProps) {
+export function ProfileForm({ initialProfile, isAdmin }: ProfileFormProps) {
   const [displayName, setDisplayName] = useState(initialProfile.display_name || '');
   const [avatarUrl, setAvatarUrl] = useState(initialProfile.avatar_url || '');
 
@@ -66,7 +67,7 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
           <p className="text-xs text-slate-400 mt-1">Manage your account information and public appearance</p>
         </div>
 
-        {initialProfile.is_admin && (
+        {isAdmin && (
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-semibold">
             <ShieldCheck className="w-3.5 h-3.5" />
             Admin

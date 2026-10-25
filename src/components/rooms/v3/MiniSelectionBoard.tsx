@@ -141,17 +141,13 @@ export function MiniSelectionBoard({
     return () => clearInterval(interval);
   }, [miniSession.selection_expires_at, miniSession.status]);
 
-  // Trigger server tick when selection timer expires so backend closes selection and starts mini auction
+  // The authenticated server worker closes expired selections and starts eligible mini auctions.
   useEffect(() => {
     if (!miniSession.selection_expires_at || miniSession.status !== 'SELECTION_OPEN') return;
 
     const remainingMs = new Date(miniSession.selection_expires_at).getTime() - Date.now();
     const timeout = setTimeout(() => {
-      fetch('/api/auction/tick', { method: 'POST' })
-        .catch(() => {})
-        .finally(() => {
-          onRefreshSession?.();
-        });
+      onRefreshSession?.();
     }, Math.max(0, remainingMs) + 300);
 
     return () => clearTimeout(timeout);

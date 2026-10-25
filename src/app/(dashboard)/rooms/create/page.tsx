@@ -10,6 +10,7 @@ import { getPlayerSets } from '@/lib/player-sets';
 import { createRoomSchema } from '@/lib/validations/room';
 import type { PlayerSet } from '@/lib/types/player-set';
 import { CreateRoomPreview } from '@/components/rooms/create-room-preview';
+import { PlayerSetCombobox } from '@/components/rooms/player-set-combobox';
 import { AuctionStepper } from '@/components/ui/auction-stepper';
 import { RoomPlayerPoolSelector } from '@/components/rooms/room-player-pool-selector';
 import {
@@ -360,7 +361,7 @@ export default function CreateRoomPage() {
                 </div>
 
                 <div>
-                  <label htmlFor="player-set-select" className="block text-xs font-bold text-[#B4BDB7] uppercase tracking-wider mb-2">
+                  <label id="player-set-label" htmlFor="player-set-select" className="block text-xs font-bold text-[#B4BDB7] uppercase tracking-wider mb-2">
                     Select Auction Player Set
                   </label>
 
@@ -389,22 +390,21 @@ export default function CreateRoomPage() {
                   )}
 
                   {!isLoadingSets && !setsError && (
-                    <select
-                      id="player-set-select"
+                    <PlayerSetCombobox
                       value={playerSetId}
-                      onChange={(e) => setPlayerSetId(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-[#0B0F0D] border border-[#2A312D] text-[#F3F4F1] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#C9A227] focus:border-transparent transition-all cursor-pointer"
-                      required
-                    >
-                      <option value="DEFAULT">Official IPL 2026 Dataset (202 Players) [Default Pool]</option>
-                      {playerSets
-                        .filter(set => set.id !== '00000000-0000-0000-0000-000000000202')
-                        .map((set) => (
-                        <option key={set.id} value={set.id}>
-                          {set.name} ({set.player_count ?? 0} Players) {set.is_public ? '[Public Pool]' : '[Private Pool]'}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={setPlayerSetId}
+                      options={[
+                        { id: 'DEFAULT', name: 'Official IPL 2026 Dataset', playerCount: 202, typeLabel: 'Default pool' },
+                        ...playerSets
+                          .filter(set => set.id !== '00000000-0000-0000-0000-000000000202')
+                          .map(set => ({
+                            id: set.id,
+                            name: set.name,
+                            playerCount: set.player_count ?? 0,
+                            typeLabel: set.is_public ? 'Public pool' : 'Private pool',
+                          })),
+                      ]}
+                    />
                   )}
                 </div>
 

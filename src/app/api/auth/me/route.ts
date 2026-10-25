@@ -3,6 +3,9 @@
 import { NextResponse } from 'next/server';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient as createServerClient } from '@/lib/supabase/server';
+
+const PROFILE_FIELDS = 'id, username, display_name, avatar_url, created_at, updated_at';
 
 export async function GET() {
   try {
@@ -21,9 +24,7 @@ export async function GET() {
       .eq('clerk_user_id', userId)
       .maybeSingle();
 
-    if (mappingError && mappingError.code !== 'PGRST116') {
-      console.error('Error fetching mapping:', mappingError);
-    }
+    if (mappingError && mappingError.code !== 'PGRST116') throw mappingError;
 
     let profileId = mapping?.profile_id;
 
@@ -119,9 +120,11 @@ export async function GET() {
     }
 
     // 3. Fetch the actual profile data to return to the client
-    const { data: profile, error } = await adminClient
+    // The row read uses the caller's Clerk JWT and own-row RLS policy.
+    const userClient = await createServerClient();
+    const { data: profile, error } = await userClient
       .from('profiles')
-      .select('*')
+      .select(PROFILE_FIELDS)
       .eq('id', profileId)
       .single();
 
@@ -171,18 +174,17 @@ export async function PUT(request: Request) {
 
     const data = await request.json();
 
-    // Use admin client to ensure update works even if RLS checks auth.uid() which might not match
-    const { data: updatedProfile, error } = await adminClient
+    const userClient = await createServerClient();
+    const { data: updatedProfile, error } = await userClient
       .from('profiles')
       .update({
         display_name: data.displayName.trim(),
         avatar_url: data.avatarUrl
           ? data.avatarUrl.trim()
           : null,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', mapping.profile_id)
-      .select('*')
+      .select(PROFILE_FIELDS)
       .single();
 
     if (error) {

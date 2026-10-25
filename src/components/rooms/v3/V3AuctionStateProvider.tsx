@@ -7,6 +7,7 @@ import { getCurrentProfile } from '@/lib/auth';
 import { getRoomById } from '@/lib/rooms';
 import { createClient } from '@/lib/supabase/client';
 import { V3AuctionState, V3AuctionLot, V3Player } from '@/lib/v3-auction-types';
+import { isBotTradeWindowOpen } from '@/lib/trade/bot-cycle-policy';
 
 interface AuctionContextValue {
   state: V3AuctionState;
@@ -47,6 +48,41 @@ export function V3AuctionStateProvider({ roomId, children }: { roomId: string; c
     }
     loadUserAndRoom();
   }, [roomId]);
+
+  useEffect(() => {
+    const auction = state.auction;
+    const miniStatus = state.miniSession?.status ?? null;
+    if (!isHost || !auction?.id || !isBotTradeWindowOpen(auction.status, miniStatus)) return;
+
+    let disposed = false;
+    let running = false;
+    const runBotTradeCycle = async () => {
+      if (disposed || running) return;
+      running = true;
+      try {
+        const response = await fetch('/api/trade/bot-cycle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auctionId: auction.id }),
+        });
+        const result = await response.json();
+        if (!disposed && (!response.ok || !result.success)) {
+          console.error('Room bot trade cycle failed:', result.error || response.statusText);
+        }
+      } catch (error) {
+        if (!disposed) console.error('Room bot trade cycle request failed:', error);
+      } finally {
+        running = false;
+      }
+    };
+
+    void runBotTradeCycle();
+    const timer = setInterval(runBotTradeCycle, 30_000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [isHost, state.auction, state.miniSession?.status]);
 
 
 

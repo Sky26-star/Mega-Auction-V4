@@ -18,6 +18,7 @@ import { AuctionHostControls } from '@/components/rooms/auction-host-controls';
 import { AuctionInvitePanel } from '@/components/rooms/auction-invite-panel';
 import { TeamModal } from '@/components/rooms/team-modal';
 import { RoomSettingsModal } from '@/components/rooms/room-settings-modal';
+import { RoomInviteModal } from '@/components/rooms/room-invite-modal';
 
 import {
   getRoomById,
@@ -162,6 +163,9 @@ export default function RoomLobbyPage() {
 
   // Settings Modal state
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+  // Invite Modal state
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   const refreshAuthoritativeState = useCallback(async (
     isEvent = false,
@@ -710,18 +714,30 @@ export default function RoomLobbyPage() {
     if (!editingTeam) return;
     try {
       await updateMyTeam(editingTeam.id, data);
+      setTeams((prev) =>
+        prev.map((t) =>
+          t.id === editingTeam.id
+            ? {
+                ...t,
+                name: data.team_name,
+                short_name: data.team_short_name.toUpperCase(),
+                color: data.team_color,
+              }
+            : t
+        )
+      );
       setIsTeamModalOpen(false);
       setEditingTeam(null);
       await loadLobbyData(false);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to update team identity');
+      throw err;
     }
   };
 
   const handleUpdateSettings = async (data: { name: string; default_purse: number; timer_duration_seconds: number; max_squad_size: number; bot_count?: number }) => {
     try {
-      await updateRoom(roomId, data);
-      setIsSettingsModalOpen(false);
+      const updatedRoom = await updateRoom(roomId, data);
+      setRoom(updatedRoom);
       await loadLobbyData(false);
     } catch (err: unknown) {
       throw err; // Modal handles displaying the error
@@ -754,10 +770,14 @@ export default function RoomLobbyPage() {
     navigator.clipboard.writeText(inviteUrl);
   };
 
-  const defaultPurseCr = room?.settings?.default_purse || 100;
+  const rawPurse = room?.settings?.default_purse || 100;
+  const defaultPurseCr = rawPurse > 1000 ? Math.round(rawPurse / 100) : rawPurse;
   const maxSquadSize = room?.settings?.max_squad_size || 15;
   const maxOverseas = room?.settings?.max_overseas || 8;
   const timerSeconds = room?.settings?.timer_duration_seconds || 15;
+  const humanParticipantsCount = useMemo(() => {
+    return participants.filter((p) => !p.is_bot).length || 1;
+  }, [participants]);
 
   const leadingTeamName = useMemo(() => {
     if (!auctionState?.highestBidderId) return 'NO BIDS / NONE';
@@ -894,7 +914,8 @@ export default function RoomLobbyPage() {
                         }
                         : undefined
                     }
-                    onCopyInvite={handleCopyInviteLink}
+                    onShareInvite={() => setIsInviteModalOpen(true)}
+                    onCopyInvite={() => setIsInviteModalOpen(true)}
                     onLeaveRoom={() => {
                       const myPart = participants.find((p) => profile && p.user_id === profile.id);
                       if (myPart) handleRemoveParticipant(myPart);
@@ -985,6 +1006,16 @@ export default function RoomLobbyPage() {
         onClose={() => setIsSettingsModalOpen(false)}
         onSubmit={handleUpdateSettings}
         initialData={room}
+        isHost={isHost}
+        humanParticipantsCount={humanParticipantsCount}
+      />
+
+      {/* Share Room Invite Modal */}
+      <RoomInviteModal
+        isOpen={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+        roomCode={room?.code || ''}
+        roomName={room?.name}
       />
     </div>
   );

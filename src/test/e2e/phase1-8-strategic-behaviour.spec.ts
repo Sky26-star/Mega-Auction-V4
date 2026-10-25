@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 // src/test/e2e/phase1-8-strategic-behaviour.spec.ts
 //
 // PHASE 1–8: END-TO-END STRATEGIC BEHAVIOUR E2E SPECIFICATION

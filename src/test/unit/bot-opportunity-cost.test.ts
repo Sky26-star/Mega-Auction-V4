@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { evaluateQAndTV } from '@/lib/auction/bot-q-engine';
 import { evaluateTacticalDecision } from '@/lib/auction/bot-tactical-engine';
 import { evaluateBotsForLot, DEFAULT_CONTEXT, type AuctionContext, type BotDecisionEvidence } from '@/lib/auction/server-bot-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, appendFileSync: vi.fn() };
+});
 
 describe('Behavior B6: Opportunity Cost / Alternative Availability', () => {
   // Current candidate: solid Category B batsman (rating 82, base price 100L)
@@ -18,6 +23,14 @@ describe('Behavior B6: Opportunity Cost / Alternative Availability', () => {
     is_overseas: false,
     image_url: null,
     rating: 82,
+    matches: 80,
+    runs: 3000,
+    batting_average: 38,
+    strike_rate: 145,
+    boundaries: 400,
+    hundreds: 2,
+    fifties: 20,
+    highest_score: 110,
   };
 
   // Attractive alternative: high-quality MARQUEE batsman (rating 95, base price 200L)
