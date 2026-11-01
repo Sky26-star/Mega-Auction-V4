@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@clerk/nextjs';
 import { V3AuctionState, V3Auction, V3AuctionLot, V3Team, V3Player } from '@/lib/v3-auction-types';
+import { reconcileAuthoritativeLot, reconcileRealtimeLot } from '@/lib/auction/auction-state-sync';
 
 let nextV3AuctionStateInstanceId = 0;
 
@@ -262,32 +263,12 @@ export function useV3AuctionState(roomId: string) {
           }
 
           setState(prev => {
-            let nextLot = rpcLot;
-            if (
-              prev.currentLot &&
-              nextLot &&
-              prev.currentLot.id === nextLot.id
-            ) {
-              const prevBid = Number(prev.currentLot.current_bid ?? 0);
-              const incomingBid = Number(nextLot.current_bid ?? 0);
-              const isStaleStatus = prev.currentLot.status === 'BIDDING' && nextLot.status === 'GET_READY';
-              const effectiveStatus = isStaleStatus ? 'BIDDING' : nextLot.status;
-
-              if (Number.isFinite(prevBid) && Number.isFinite(incomingBid) && prevBid > incomingBid) {
-                nextLot = {
-                  ...nextLot,
-                  status: effectiveStatus,
-                  current_bid: prevBid,
-                  highest_bidder_team_id: prev.currentLot.highest_bidder_team_id,
-                  timer_expires_at: prev.currentLot.timer_expires_at || nextLot.timer_expires_at,
-                };
-              } else if (isStaleStatus) {
-                nextLot = {
-                  ...nextLot,
-                  status: effectiveStatus,
-                };
-              }
-            }
+            const nextLot = reconcileAuthoritativeLot(
+              prev.auction?.id ?? null,
+              prev.currentLot,
+              rpcAuction.id,
+              rpcLot
+            );
 
             return {
               auction: rpcAuction,
@@ -441,32 +422,12 @@ export function useV3AuctionState(roomId: string) {
 
       if (mountedRef.current && seq === fetchSeqRef.current) {
         setState(prev => {
-          let nextLot = currentLot;
-          if (
-            prev.currentLot &&
-            nextLot &&
-            prev.currentLot.id === nextLot.id
-          ) {
-            const prevBid = Number(prev.currentLot.current_bid ?? 0);
-            const incomingBid = Number(nextLot.current_bid ?? 0);
-            const isStaleStatus = prev.currentLot.status === 'BIDDING' && nextLot.status === 'GET_READY';
-            const effectiveStatus = isStaleStatus ? 'BIDDING' : nextLot.status;
-
-            if (Number.isFinite(prevBid) && Number.isFinite(incomingBid) && prevBid > incomingBid) {
-              nextLot = {
-                ...nextLot,
-                status: effectiveStatus,
-                current_bid: prevBid,
-                highest_bidder_team_id: prev.currentLot.highest_bidder_team_id,
-                timer_expires_at: prev.currentLot.timer_expires_at || nextLot.timer_expires_at,
-              };
-            } else if (isStaleStatus) {
-              nextLot = {
-                ...nextLot,
-                status: effectiveStatus,
-              };
-            }
-          }
+          const nextLot = reconcileAuthoritativeLot(
+            prev.auction?.id ?? null,
+            prev.currentLot,
+            auction.id,
+            currentLot
+          );
 
           return {
             auction,
@@ -569,63 +530,13 @@ export function useV3AuctionState(roomId: string) {
         // Apply state instantly to avoid fetch delays/caching issues for timers
         // Apply only non-stale lot updates.
         if (mountedRef.current) {
-          const incomingBid = Number(updatedLot.current_bid);
-
           fetchSeqRef.current++;
 
           setState((prev) => {
             const currentLot = prev.currentLot;
-
-            // Update for the same lot
-            if (currentLot && currentLot.id === updatedLot.id) {
-              const displayedBid = Number(currentLot.current_bid);
-
-              // Monotonic bid protection on the SAME lot:
-              // Never move bid backwards while actively bidding
-              if (
-                Number.isFinite(incomingBid) &&
-                Number.isFinite(displayedBid) &&
-                incomingBid < displayedBid &&
-                currentLot.status === 'BIDDING' &&
-                updatedLot.status === 'BIDDING'
-              ) {
-                return {
-                  ...prev,
-                  currentLot: {
-                    ...currentLot,
-                    ...updatedLot,
-                    current_bid: displayedBid,
-                    highest_bidder_team_id: currentLot.highest_bidder_team_id || updatedLot.highest_bidder_team_id,
-                  },
-                };
-              }
-
-              return {
-                ...prev,
-                currentLot: {
-                  ...currentLot,
-                  ...updatedLot,
-                },
-              };
-            }
-
-            // Update for a different lot (lot transition or newly active lot)
-            const isNewActiveLot =
-              !currentLot ||
-              updatedLot.status === 'GET_READY' ||
-              updatedLot.status === 'BIDDING' ||
-              (updatedLot.status as string) === 'ACTIVE' ||
-              ((currentLot.status === 'SOLD' || currentLot.status === 'UNSOLD') && updatedLot.lot_index >= currentLot.lot_index);
-
-            if (isNewActiveLot) {
-              // Lot changes must not retain stale bid state from the prior lot
-              return {
-                ...prev,
-                currentLot: updatedLot,
-              };
-            }
-
-            return prev;
+            const nextLot = reconcileRealtimeLot(currentLot, updatedLot);
+            if (nextLot === currentLot) return prev;
+            return { ...prev, currentLot: nextLot };
           });
 
           // If the lot transitioned and player is not yet loaded, load it asynchronously

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { createClient } from '@/lib/supabase/server';
+import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
 
 export async function POST(request: Request) {
   try {
@@ -36,36 +37,24 @@ export async function POST(request: Request) {
       p_auction_id: auctionId,
     });
 
-    if (error) {
+    const rpcFailure = getAuctionRpcFailure(data, error, 'RPC returned no successful result.');
+    if (rpcFailure) {
       console.error('Error in v3_initiate_mini_auction RPC:', error);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    if (data && data.success === false) {
-      if (data.error === 'ERR_UNAUTHORIZED') {
-        return NextResponse.json(
-          { success: false, error: 'ERR_UNAUTHORIZED' },
-          { status: 403 }
-        );
-      }
-      if (data.error === 'ERR_AUCTION_NOT_COMPLETED') {
-        return NextResponse.json(
-          { success: false, error: 'ERR_AUCTION_NOT_COMPLETED' },
-          { status: 400 }
-        );
-      }
-      if (data.error === 'ERR_AUCTION_NOT_FOUND' || data.error === 'ERR_ROOM_NOT_FOUND') {
-        return NextResponse.json(
-          { success: false, error: data.error },
-          { status: 404 }
-        );
+      if (!error && data && typeof data === 'object' && !Array.isArray(data)) {
+        const rpcErrorCode = typeof data.error === 'string' ? data.error : rpcFailure;
+        if (rpcErrorCode === 'ERR_UNAUTHORIZED') {
+          return NextResponse.json({ success: false, error: rpcErrorCode }, { status: 403 });
+        }
+        if (rpcErrorCode === 'ERR_AUCTION_NOT_COMPLETED') {
+          return NextResponse.json({ success: false, error: rpcErrorCode }, { status: 400 });
+        }
+        if (rpcErrorCode === 'ERR_AUCTION_NOT_FOUND' || rpcErrorCode === 'ERR_ROOM_NOT_FOUND') {
+          return NextResponse.json({ success: false, error: rpcErrorCode }, { status: 404 });
+        }
       }
       return NextResponse.json(
-        { success: false, error: data.error || 'Failed to initiate mini auction' },
-        { status: 400 }
+        { success: false, error: rpcFailure },
+        { status: error ? 500 : (!data || typeof data !== 'object' || Array.isArray(data) ? 502 : 400) }
       );
     }
 

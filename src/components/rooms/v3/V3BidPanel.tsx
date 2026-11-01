@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { V3AuctionLot, V3Team } from '@/lib/v3-auction-types';
 import { getNextMinimumBid } from '@/lib/auction/bid-increments';
 import { createClient } from '@/lib/supabase/client';
+import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
 import { Loader2 } from 'lucide-react';
 
 interface V3BidPanelProps {
@@ -36,10 +37,8 @@ export function V3BidPanel({ lot, teams, myTeam, auctionId, onBidSuccess, timer,
         p_request_id: requestId
       });
 
-      if (error) throw error;
-      if (data && !data.success) {
-        throw new Error(data.error || 'Failed to place bid');
-      }
+      const rpcFailure = getAuctionRpcFailure(data, error, 'Bid request returned no successful result.');
+      if (rpcFailure) throw new Error(rpcFailure);
 
       onBidSuccess?.();
     } catch (err: any) {

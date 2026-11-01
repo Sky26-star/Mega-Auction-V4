@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Settings, X, Loader2, AlertCircle, Save, Coins, Clock, Users, Cpu } from 'lucide-react';
 import { AuctionStepper } from '@/components/ui/auction-stepper';
 import type { Room } from '@/lib/types/room';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 
 export interface RoomSettingsModalProps {
   isOpen: boolean;
@@ -86,7 +87,7 @@ export function RoomSettingsModal({
     }
   }, [isOpen, initialData, isHost, maxAllowedBots]);
 
-  const currentActiveBots = enableBots ? botCount : 0;
+  const currentActiveBots = AUCTION_BOTS_ENABLED && enableBots ? botCount : 0;
 
   const hasUnsavedChanges = useCallback(() => {
     if (!initialData) return false;
@@ -355,6 +356,7 @@ export function RoomSettingsModal({
             </div>
 
             {/* Bots Section */}
+            {AUCTION_BOTS_ENABLED && (
             <div className="p-5 rounded-2xl bg-[#0B0F0D] border border-[#2A312D] space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2.5">
@@ -398,6 +400,7 @@ export function RoomSettingsModal({
                 </div>
               )}
             </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center justify-end space-x-3 pt-4 border-t border-[#2A312D]">

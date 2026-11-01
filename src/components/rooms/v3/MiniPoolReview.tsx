@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { V3MiniAuctionSession, V3Player } from '@/lib/v3-auction-types';
 import { createClient } from '@/lib/supabase/client';
+import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
 import {
   Sparkles,
   Trophy,
@@ -132,10 +133,8 @@ export function MiniPoolReview({
         p_auction_id: auctionId
       });
 
-      if (error) throw error;
-      if (data && !data.success) {
-        throw new Error(data.error || 'Failed to start Mini Auction');
-      }
+      const rpcFailure = getAuctionRpcFailure(data, error, 'Mini-auction start returned no successful result.');
+      if (rpcFailure) throw new Error(rpcFailure);
 
       onStartSuccess?.();
     } catch (err: any) {

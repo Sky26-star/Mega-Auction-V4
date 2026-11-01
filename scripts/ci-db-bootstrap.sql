@@ -22,6 +22,14 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN CREATE ROLE dashboard_user; END IF;
 END $$;
 
+-- Configure standard Supabase administrative role attributes for the disposable CI database.
+-- In Supabase, service_role, supabase_admin, and postgres possess BYPASSRLS by default.
+-- In plain postgres:17-alpine, this attribute must be explicitly set so service_role queries
+-- bypass table RLS policies as designed, without evaluating human-identity policies.
+ALTER ROLE service_role WITH BYPASSRLS;
+ALTER ROLE supabase_admin WITH BYPASSRLS;
+ALTER ROLE postgres WITH BYPASSRLS;
+
 -- Configure Supabase-standard default privileges
 ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;

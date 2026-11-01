@@ -5,6 +5,8 @@ import { createClient } from './supabase/client';
 import { getCurrentProfile } from './auth';
 import { getUniqueBotIdentities } from './bots';
 import { normalizePurseToLakhs } from '@/lib/auction/units';
+import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import type {
   Room,
   RoomPreview,
@@ -280,7 +282,9 @@ export async function createRoom(
   const supabase = createClient();
 
   // 1. Determine Bot Opponents Selection (Min 0, Max 9)
-  const requestedBotCount = Math.min(9, Math.max(0, input.bot_count ?? 0));
+  const requestedBotCount = AUCTION_BOTS_ENABLED
+    ? Math.min(9, Math.max(0, input.bot_count ?? 0))
+    : 0;
   const selectedBots = getUniqueBotIdentities(requestedBotCount, [input.team_name]);
 
   const botPayload = selectedBots.map((b) => ({
@@ -347,11 +351,19 @@ export async function createRoom(
       throw new Error(formatRpcError(error.message));
     }
 
+    if (!data || typeof data !== 'object' || Array.isArray(data) || data.success === false) {
+      const rpcFailure = getAuctionRpcFailure(data, null, 'Room creation RPC returned an invalid result.');
+      throw new Error(formatRpcError(rpcFailure ?? 'Room creation RPC returned an invalid result.'));
+    }
+    if (typeof data.room_id !== 'string' || data.room_id.length === 0) {
+      throw new Error('Room creation RPC returned success without a room ID.');
+    }
+
     rpcData = data;
     break;
   }
 
-  if (!rpcData) {
+  if (!rpcData || typeof rpcData.room_id !== 'string') {
     throw new Error(
       lastCollisionError
         ? `Failed to generate a unique room code after ${maxRetries} attempts. Please try again.`
@@ -363,18 +375,19 @@ export async function createRoom(
 
   // 3. Atomically Provision Bot Opponents via trusted SECURITY DEFINER RPC
   if (requestedBotCount > 0 && selectedBots.length > 0) {
-    const { error: botRpcError } = await supabase.rpc('provision_room_bots', {
+    const { data: botRpcData, error: botRpcError } = await supabase.rpc('provision_room_bots', {
       p_room_id: roomId,
       p_bots: botPayload,
     });
 
-    if (botRpcError) {
+    const botRpcFailure = getAuctionRpcFailure(botRpcData, botRpcError, 'Bot provisioning RPC returned no successful result.');
+    if (botRpcFailure) {
       // Rollback created room if RPC fails
       await supabase.from('rooms').delete().eq('id', roomId);
-      if (botRpcError.code === 'PGRST202' || botRpcError.message?.includes('schema cache')) {
+      if (botRpcError?.code === 'PGRST202' || botRpcError?.message?.includes('schema cache')) {
         throw new Error('THE RPC MIGRATION MUST BE APPLIED TO THE CONNECTED SUPABASE DATABASE.');
       }
-      throw new Error(formatRpcError(botRpcError.message));
+      throw new Error(formatRpcError(botRpcFailure));
     }
   }
 
@@ -408,6 +421,14 @@ export async function joinRoomWithTeam(
 
   if (error) {
     throw new Error(formatRpcError(error.message));
+  }
+
+  if (!data || typeof data !== 'object' || Array.isArray(data) || data.success === false) {
+    const rpcFailure = getAuctionRpcFailure(data, null, 'Room join RPC returned an invalid result.');
+    throw new Error(formatRpcError(rpcFailure ?? 'Room join RPC returned an invalid result.'));
+  }
+  if (typeof data.room_id !== 'string' || data.room_id.length === 0) {
+    throw new Error('Room join RPC returned success without a room ID.');
   }
 
   return {
@@ -553,7 +574,9 @@ export async function updateRoom(roomId: string, input: UpdateRoomInput): Promis
   if (existingRoom.host_id !== profile.id) throw new Error('Only the room host can edit room settings.');
   if (existingRoom.status !== 'OPEN') throw new Error('Cannot edit settings after auction has started.');
 
-  const newBotCount = Math.min(9, Math.max(0, input.bot_count ?? existingRoom.settings?.bot_count ?? 0));
+  const newBotCount = AUCTION_BOTS_ENABLED
+    ? Math.min(9, Math.max(0, input.bot_count ?? existingRoom.settings?.bot_count ?? 0))
+    : 0;
   let updatedBots = (existingRoom.settings?.bots as any[]) || [];
 
   if (newBotCount !== (existingRoom.settings?.bot_count ?? 0) || updatedBots.length !== newBotCount) {

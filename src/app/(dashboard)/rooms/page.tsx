@@ -12,6 +12,7 @@ import { getRooms, updateRoom, deleteRoom } from '@/lib/rooms';
 import { getCurrentProfile } from '@/lib/auth';
 import type { Room } from '@/lib/types/room';
 import type { Profile } from '@/lib/types/auth';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import {
   PlusCircle,
   LogIn,
@@ -96,7 +97,7 @@ export default function RoomsPage() {
         default_purse: editPurse,
         timer_duration_seconds: editTimer,
         max_squad_size: editSquad,
-        bot_count: editBotCount,
+        bot_count: AUCTION_BOTS_ENABLED ? editBotCount : 0,
       });
       setEditingRoom(null);
       await loadData();
@@ -319,17 +320,19 @@ export default function RoomsPage() {
                   onChange={setEditSquad}
                 />
 
-                <AuctionStepper
-                  label="BOT OPPONENTS"
-                  icon={<Cpu className="w-3.5 h-3.5 text-[#E4B93F]" />}
-                  value={editBotCount}
-                  min={0}
-                  max={9}
-                  step={1}
-                  formatValue={(v) => (v === 0 ? '0 BOTS' : `${v} BOTS`)}
-                  formatDelta={(d) => (d > 0 ? `+${d} BOT` : `-${Math.abs(d)} BOT`)}
-                  onChange={setEditBotCount}
-                />
+                {AUCTION_BOTS_ENABLED && (
+                  <AuctionStepper
+                    label="BOT OPPONENTS"
+                    icon={<Cpu className="w-3.5 h-3.5 text-[#E4B93F]" />}
+                    value={editBotCount}
+                    min={0}
+                    max={9}
+                    step={1}
+                    formatValue={(v) => (v === 0 ? '0 BOTS' : `${v} BOTS`)}
+                    formatDelta={(d) => (d > 0 ? `+${d} BOT` : `-${Math.abs(d)} BOT`)}
+                    onChange={setEditBotCount}
+                  />
+                )}
               </div>
 
               {/* Footer Actions */}

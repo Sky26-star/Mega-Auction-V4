@@ -1,6 +1,9 @@
 import './setup/e2e-target-guard';
 import { test, expect, Page } from '@playwright/test';
 import crypto from 'crypto';
+import { clerkClient } from '@clerk/nextjs/server';
+import { clerk as clerkTesting, clerkSetup } from '@clerk/testing/playwright';
+import { loadEnvConfig } from '@next/env';
 import { createClient } from '@supabase/supabase-js';
 import {
   createDisposableTestUser,
@@ -8,10 +11,141 @@ import {
   cleanupDisposableAuction,
 } from './setup/auction-fixture';
 
+loadEnvConfig(process.cwd());
+if (!process.env.CLERK_PUBLISHABLE_KEY && process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+  process.env.CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+}
+
 const supabaseAdmin = createClient(
   process.env.SUPABASE_TEST_URL!,
   process.env.SUPABASE_TEST_SERVICE_ROLE_KEY!
 );
+
+async function createClerkDisposableTestUser() {
+  if (
+    !process.env.CLERK_SECRET_KEY?.startsWith('sk_test_') ||
+    !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith('pk_test_')
+  ) {
+    throw new Error('Browser lifecycle tests require Clerk development test keys.');
+  }
+
+  const runId = crypto.randomUUID();
+  const email = `e2e_${runId.replace(/-/g, '').slice(0, 12)}+clerk_test@example.com`;
+  const username = `e2e_${runId.replace(/-/g, '').slice(0, 12)}`;
+  const clerk = await clerkClient();
+  const clerkUser = await clerk.users.createUser({
+    emailAddress: [email],
+    emailAddressIdentificationStatus: ['verified'],
+    password: `Pass_${runId}!`,
+    username,
+    firstName: 'E2E',
+    lastName: 'Test',
+  });
+
+  return {
+    runId,
+    email,
+    clerkUserId: clerkUser.id,
+    user: null as any,
+    supabase: null as any,
+    profileId: null as string | null,
+  };
+}
+
+async function loginClerkTestUser(page: Page, testUser: any) {
+  await clerkSetup();
+  await page.goto('/');
+  await clerkTesting.signIn({ page, emailAddress: testUser.email });
+  const signInBrowserState = await page.evaluate(() => {
+    const clerk = (window as any).Clerk;
+    return { loaded: clerk?.loaded ?? false, userId: clerk?.user?.id ?? null, sessionId: clerk?.session?.id ?? null };
+  });
+  if (!signInBrowserState.loaded || !signInBrowserState.userId || !signInBrowserState.sessionId || signInBrowserState.userId !== testUser.clerkUserId) {
+    throw new Error('Clerk helper did not create a session for the expected disposable test user.');
+  }
+
+  const profileResponse = await page.request.get('/api/auth/me', { timeout: 30000 });
+  const payload = await profileResponse.json().catch(() => null);
+  const profileId = payload?.profile?.id;
+  if (!profileResponse.ok() || !profileId) {
+    throw new Error(`Clerk test identity provisioning failed with HTTP ${profileResponse.status()}, body ${JSON.stringify(payload)}.`);
+  }
+  const { data: mapping, error: mappingError } = await supabaseAdmin
+    .from('clerk_user_mappings')
+    .select('clerk_user_id')
+    .eq('profile_id', profileId)
+    .single();
+  if (mappingError || !mapping?.clerk_user_id) {
+    throw new Error(`Clerk identity mapping was not provisioned: ${mappingError?.message || 'missing mapping'}.`);
+  }
+
+  const password = `Pass_${testUser.runId}!`;
+  const { error: passwordError } = await supabaseAdmin.auth.admin.updateUserById(profileId, {
+    password,
+    email_confirm: true,
+  });
+  if (passwordError) throw new Error(`Failed to prepare the local shadow identity: ${passwordError.message}.`);
+
+  const userClient = createClient(
+    process.env.SUPABASE_TEST_URL!,
+    process.env.SUPABASE_TEST_ANON_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  );
+  const { data: authData, error: authError } = await userClient.auth.signInWithPassword({
+    email: testUser.email,
+    password,
+  });
+  if (authError || !authData.user || !authData.session) {
+    throw new Error(`Failed to authenticate the local shadow identity: ${authError?.message || 'missing session'}.`);
+  }
+
+  testUser.profileId = profileId;
+  testUser.clerkUserId = mapping.clerk_user_id;
+  testUser.user = authData.user;
+  testUser.supabase = userClient;
+  return testUser;
+}
+
+async function cleanupClerkDisposableTestUser(testUser: any) {
+  let remoteFailure: unknown;
+  try {
+    const clerk = await clerkClient();
+    const result = await clerk.users.getUserList({ emailAddress: [testUser.email], limit: 10 });
+    const matches = result.data.filter((user) =>
+      user.emailAddresses.some((email) => email.emailAddress.toLowerCase() === testUser.email.toLowerCase())
+    );
+    for (const user of matches) await clerk.users.deleteUser(user.id);
+  } catch (error) {
+    remoteFailure = error;
+  }
+
+  let localFailure: unknown;
+  try {
+    let profileId = testUser.profileId as string | null;
+    if (!profileId) {
+      const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      profileId = data.users.find((user) => user.email?.toLowerCase() === testUser.email.toLowerCase())?.id || null;
+    }
+    if (profileId) {
+      const { error: mappingError } = await supabaseAdmin
+        .from('clerk_user_mappings')
+        .delete()
+        .eq('profile_id', profileId);
+      if (mappingError) throw mappingError;
+      const { error: userError } = await supabaseAdmin.auth.admin.deleteUser(profileId);
+      if (userError && !userError.message.toLowerCase().includes('not found')) throw userError;
+    }
+  } catch (error) {
+    localFailure = error;
+  }
+
+  if (remoteFailure || localFailure) {
+    const details = [remoteFailure, localFailure]
+      .filter(Boolean)
+      .map((error) => error instanceof Error ? error.message : String(error));
+    throw new Error(`Failed to fully clean up a disposable Clerk test identity: ${details.join('; ')}`);
+  }
+}
 
 // Helper: authenticate test user in Playwright page
 async function loginAndNavigate(page: Page, testUser: any, targetPath: string) {
@@ -35,73 +169,85 @@ async function setupF1CompletedAuction(hostUser: any, runId: string) {
   });
 
   const { roomId, auctionId, hostTeamId, roomCode } = auctionSetup;
-
-  // Query 2 existing players
-  const { data: players } = await supabaseAdmin
+  const { data: players, error: playersError } = await supabaseAdmin
     .from('players')
     .select('id, name, role, category, country, base_price, is_overseas')
     .limit(2);
 
-  if (!players || players.length < 2) {
-    throw new Error('Database must have at least 2 players in players table for fixtures');
+  if (playersError || !players || players.length < 2) {
+    throw new Error(`Database must have at least 2 players in players table for fixtures: ${playersError?.message || 'not enough players'}`);
   }
 
   const p1 = players[0]!;
   const p2 = players[1]!;
+  const { data: lot1, error: lot1LookupError } = await supabaseAdmin
+    .from('auction_lots')
+    .select('id')
+    .eq('auction_id', auctionId)
+    .eq('player_id', p1.id)
+    .eq('is_mini_round', false)
+    .single();
+  if (lot1LookupError || !lot1) throw new Error(`Could not find seeded lot for the sold test player: ${lot1LookupError?.message || 'missing lot'}`);
 
-  const lot1Id = crypto.randomUUID();
-  const lot2Id = crypto.randomUUID();
+  const { data: lot2, error: lot2LookupError } = await supabaseAdmin
+    .from('auction_lots')
+    .select('id')
+    .eq('auction_id', auctionId)
+    .eq('player_id', p2.id)
+    .eq('is_mini_round', false)
+    .single();
+  if (lot2LookupError || !lot2) throw new Error(`Could not find seeded lot for the unsold test player: ${lot2LookupError?.message || 'missing lot'}`);
 
-  // Insert Lot 1: SOLD
-  await supabaseAdmin.from('auction_lots').insert({
-    id: lot1Id,
-    auction_id: auctionId,
-    player_id: p1.id,
-    lot_index: 1,
-    status: 'SOLD',
-    base_price: p1.base_price,
-    current_bid: p1.base_price + 50,
-    winning_bid: p1.base_price + 50,
-    winning_team_id: hostTeamId,
-    is_mini_round: false,
-  });
+  const soldPrice = p1.base_price + 50;
+  const { error: soldLotError } = await supabaseAdmin
+    .from('auction_lots')
+    .update({
+      status: 'SOLD',
+      current_bid: soldPrice,
+      winning_bid: soldPrice,
+      winning_team_id: hostTeamId,
+      highest_bidder_team_id: hostTeamId,
+      timer_expires_at: null,
+      get_ready_expires_at: null,
+    })
+    .eq('id', lot1.id);
+  expect(soldLotError).toBeNull();
 
-  await supabaseAdmin.from('squad_players').insert({
+  const { error: squadPlayerError } = await supabaseAdmin.from('squad_players').insert({
     id: crypto.randomUUID(),
     auction_id: auctionId,
     team_id: hostTeamId,
     player_id: p1.id,
-    lot_id: lot1Id,
-    purchase_price: p1.base_price + 50,
-    is_active: true,
+    lot_id: lot1.id,
+    purchase_price: soldPrice,
   });
+  expect(squadPlayerError).toBeNull();
 
-  // Insert Lot 2: UNSOLD
-  await supabaseAdmin.from('auction_lots').insert({
-    id: lot2Id,
-    auction_id: auctionId,
-    player_id: p2.id,
-    lot_index: 2,
-    status: 'UNSOLD',
-    base_price: p2.base_price,
-    current_bid: null,
-    winning_bid: null,
-    winning_team_id: null,
-    is_mini_round: false,
-  });
+  const { error: unsoldLotError } = await supabaseAdmin
+    .from('auction_lots')
+    .update({
+      status: 'UNSOLD',
+      current_bid: p2.base_price,
+      winning_bid: null,
+      winning_team_id: null,
+      highest_bidder_team_id: null,
+      timer_expires_at: null,
+      get_ready_expires_at: null,
+    })
+    .eq('id', lot2.id);
+  expect(unsoldLotError).toBeNull();
 
-  // Deduct spend from host team
-  await supabaseAdmin
+  const { error: teamError } = await supabaseAdmin
     .from('teams')
     .update({
-      purse: 10000 - (p1.base_price + 50),
+      purse: 10000 - soldPrice,
       players_bought: 1,
       overseas_count: p1.is_overseas ? 1 : 0,
     })
     .eq('id', hostTeamId);
+  expect(teamError).toBeNull();
 
-  // Mark Auction COMPLETED
-  await supabaseAdmin
+  const { error: auctionError } = await supabaseAdmin
     .from('auctions')
     .update({
       status: 'COMPLETED',
@@ -109,6 +255,7 @@ async function setupF1CompletedAuction(hostUser: any, runId: string) {
       mega_completed_at: new Date().toISOString(),
     })
     .eq('id', auctionId);
+  expect(auctionError).toBeNull();
 
   return {
     roomId,
@@ -119,7 +266,6 @@ async function setupF1CompletedAuction(hostUser: any, runId: string) {
     p2,
   };
 }
-
 // Helper: Seed F2 (Mini Auction Initialized in SETUP)
 async function setupF2MiniInitialized(hostUser: any, runId: string) {
   const f1 = await setupF1CompletedAuction(hostUser, runId);
@@ -678,15 +824,17 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-013 — Refresh During Mini Auction
   // ==========================================================================
   test('MA-MINI-013 — Refresh During Mini Auction', async ({ page }) => {
-    const hostUser = await createDisposableTestUser();
+    const hostUser = await createClerkDisposableTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
     try {
+      await loginClerkTestUser(page, hostUser);
       const f2 = await setupF2MiniInitialized(hostUser, runId);
       roomId = f2.roomId;
 
-      await loginAndNavigate(page, hostUser, `/rooms/${f2.roomId}/mini-auction`);
+      await page.goto(`/rooms/${f2.roomId}/mini-auction`);
+      await page.waitForLoadState('domcontentloaded');
 
       // 1. Capture authoritative state before refresh
       const beforeRefresh = await supabaseAdmin
@@ -718,7 +866,11 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       expect(renderedAuctionId).toBe(f2.auctionId);
       expect(renderedSessionId).toBe(f2.miniAuctionSessionId);
     } finally {
-      if (roomId) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      try {
+        if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      } finally {
+        await cleanupClerkDisposableTestUser(hostUser);
+      }
     }
   });
 
@@ -726,8 +878,8 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-014 — Reconnect / Second Context Recovery
   // ==========================================================================
   test('MA-MINI-014 — Reconnect / Second Context Recovery', async ({ browser }) => {
-    const hostUser = await createDisposableTestUser();
-    const secondUser = await createDisposableTestUser();
+    const hostUser = await createClerkDisposableTestUser();
+    const secondUser = await createClerkDisposableTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
@@ -735,26 +887,29 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
     const secondContext = await browser.newContext();
 
     try {
+      const hostPage = await hostContext.newPage();
+      const secondPage = await secondContext.newPage();
+      await loginClerkTestUser(hostPage, hostUser);
+      await loginClerkTestUser(secondPage, secondUser);
+
       const f3 = await setupF3SelectionClosed(hostUser, runId);
       roomId = f3.roomId;
 
       // Add secondUser as room participant
-      await supabaseAdmin.from('room_participants').insert({
+      const { error: participantError } = await supabaseAdmin.from('room_participants').insert({
         id: crypto.randomUUID(),
         room_id: f3.roomId,
         user_id: secondUser.user.id,
         role: 'SPECTATOR',
       });
-
-      const hostPage = await hostContext.newPage();
-      const secondPage = await secondContext.newPage();
+      expect(participantError).toBeNull();
 
       // Context 1: Host opens mini-auction
-      await loginAndNavigate(hostPage, hostUser, `/rooms/${f3.roomId}/mini-auction`);
+      await hostPage.goto(`/rooms/${f3.roomId}/mini-auction`);
       await expect(hostPage.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
 
       // Context 2: Second user opens mini-auction
-      await loginAndNavigate(secondPage, secondUser, `/rooms/${f3.roomId}/mini-auction`);
+      await secondPage.goto(`/rooms/${f3.roomId}/mini-auction`);
       await expect(secondPage.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
 
       // Authoritative state
@@ -769,6 +924,39 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
 
       expect(context2Phase).toBe(authoritative!.status);
       expect(context2SessionId).toBe(authoritative!.id);
+      // The host advances the session; the spectator must receive the authoritative realtime state.
+      await hostPage.getByRole('button', { name: /START MINI AUCTION/i }).click();
+      try {
+        await expect(hostPage.getByTestId('mini-auction-phase')).toHaveAttribute('data-status', 'BIDDING', { timeout: 15000 });
+      } catch {
+        const startErrors = await hostPage.locator('p.text-red-400').allTextContents();
+        const { data: failedStartState } = await supabaseAdmin
+          .from('mini_auction_sessions')
+          .select('status')
+          .eq('auction_id', f3.auctionId)
+          .single();
+        throw new Error(`Mini-auction start did not advance. Database=${failedStartState?.status}; UI error=${startErrors.join(' | ') || 'none'}.`);
+      }
+      await expect(secondPage.getByTestId('mini-auction-phase')).toHaveAttribute('data-status', 'BIDDING', { timeout: 15000 });
+      const { data: afterStart } = await supabaseAdmin
+        .from('mini_auction_sessions')
+        .select('*')
+        .eq('auction_id', f3.auctionId)
+        .single();
+      expect(afterStart!.status).toBe('BIDDING');
+      expect(afterStart!.id).toBe(authoritative!.id);
+      // Refresh the second context and verify it recovers the same authoritative session.
+      await secondPage.reload();
+      await expect(secondPage.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
+      expect(await secondPage.getByTestId('mini-auction-phase').getAttribute('data-status')).toBe(afterStart!.status);
+      expect(await secondPage.getByTestId('mini-auction-page').getAttribute('data-session-id')).toBe(authoritative!.id);
+
+      // A late second tab in the same context must also join the existing session.
+      const secondTab = await secondContext.newPage();
+      await secondTab.goto(`/rooms/${f3.roomId}/mini-auction`);
+      await expect(secondTab.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
+      expect(await secondTab.getByTestId('mini-auction-phase').getAttribute('data-status')).toBe(afterStart!.status);
+      expect(await secondTab.getByTestId('mini-auction-page').getAttribute('data-session-id')).toBe(authoritative!.id);
 
       // Verify no duplicate session was created
       const { data: sessions } = await supabaseAdmin
@@ -780,7 +968,12 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
     } finally {
       await hostContext.close();
       await secondContext.close();
-      if (roomId) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      try {
+        if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      } finally {
+        await cleanupClerkDisposableTestUser(secondUser);
+        await cleanupClerkDisposableTestUser(hostUser);
+      }
     }
   });
 
@@ -825,41 +1018,34 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-016 — Full Main → Summary → Mini Lifecycle (Serial Full Lifecycle)
   // ==========================================================================
   test('MA-MINI-016 — Full Main → Summary → Mini Lifecycle', async ({ page }) => {
-    const hostUser = await createDisposableTestUser();
+    const hostUser = await createClerkDisposableTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
     try {
-      // 1. Fresh Main Auction (F0)
-      const auctionSetup = await setupDisposableAuction(hostUser.supabase, runId);
+      await loginClerkTestUser(page, hostUser);
+
+      // 1. Seed the completed main auction with one sold and one unsold existing lot.
+      const auctionSetup = await setupF1CompletedAuction(hostUser, runId);
       roomId = auctionSetup.roomId;
       const auctionId = auctionSetup.auctionId;
       const hostTeamId = auctionSetup.hostTeamId;
+      const players = [auctionSetup.p1, auctionSetup.p2];
 
-      const { data: players } = await supabaseAdmin.from('players').select('*').limit(2);
-      const p1 = players![0];
-
-      // Finalize Main lot to reach COMPLETED
-      await supabaseAdmin.from('auction_lots').insert({
-        id: crypto.randomUUID(),
-        auction_id: auctionId,
-        player_id: p1.id,
-        lot_index: 1,
-        status: 'SOLD',
-        base_price: p1.base_price,
-        winning_bid: p1.base_price,
-        winning_team_id: hostTeamId,
-        is_mini_round: false,
-      });
-
-      await supabaseAdmin.from('auctions').update({
-        status: 'COMPLETED',
-        completed_at: new Date().toISOString(),
-        mega_completed_at: new Date().toISOString(),
-      }).eq('id', auctionId);
+      const clerkToken = await page.evaluate(async () => (window as any).Clerk?.session?.getToken({ template: 'supabase' }));
+      expect(clerkToken).toBeTruthy();
+      const roomRead = await page.request.get(
+        `${process.env.SUPABASE_TEST_URL}/rest/v1/rooms?id=eq.${roomId}&select=id,host_id`,
+        { headers: { apikey: process.env.SUPABASE_TEST_ANON_KEY!, authorization: `Bearer ${clerkToken}` } }
+      );
+      expect(roomRead.ok()).toBe(true);
+      expect(await roomRead.json()).toEqual([
+        expect.objectContaining({ id: roomId, host_id: hostUser.profileId }),
+      ]);
 
       // 2. Open Summary
-      await loginAndNavigate(page, hostUser, `/rooms/${roomId}/summary`);
+      await page.goto(`/rooms/${roomId}/summary`);
+      await page.waitForLoadState('domcontentloaded');
       await expect(page.getByTestId('mini-auction-start')).toBeVisible();
 
       // 3. Start Mini Auction -> SETUP
@@ -925,7 +1111,11 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       await expect(phaseBadge).toHaveAttribute('data-status', 'COMPLETED');
       await expect(page.getByTestId('mini-auction-complete')).toBeVisible();
     } finally {
-      if (roomId) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      try {
+        if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      } finally {
+        await cleanupClerkDisposableTestUser(hostUser);
+      }
     }
   });
 });

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import { auth } from '@clerk/nextjs/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createServerClient } from '@/lib/supabase/server';
@@ -14,6 +15,10 @@ import type { V3Player, V3Team } from '@/lib/v3-auction-types';
 
 
 export async function POST(request: Request) {
+  if (!AUCTION_BOTS_ENABLED) {
+    return NextResponse.json({ success: false, error: 'Bot features are deferred to a later version.' }, { status: 404 });
+  }
+
   let releaseCycle: (() => void) | null = null;
   try {
     const { userId } = await auth();

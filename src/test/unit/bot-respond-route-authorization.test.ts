@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -107,7 +108,19 @@ async function respond() {
   }));
 }
 
-describe('bot-respond ACCEPT authorization', () => {
+describe('bot-respond V1 release gate', () => {
+  it.skipIf(AUCTION_BOTS_ENABLED)('returns disabled without reading auth or touching the database', async () => {
+    const response = await respond();
+    const result = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(result.error).toContain('deferred');
+    expect(mocks.auth).not.toHaveBeenCalled();
+    expect(mocks.admin.from).not.toHaveBeenCalled();
+  });
+});
+
+describe.skipIf(!AUCTION_BOTS_ENABLED)('bot-respond ACCEPT authorization', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('lets a verified host-proposer process a bot ACCEPT through the server-only RPC', async () => {

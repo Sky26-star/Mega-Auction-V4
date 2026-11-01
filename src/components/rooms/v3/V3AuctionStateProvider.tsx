@@ -8,6 +8,7 @@ import { getRoomById } from '@/lib/rooms';
 import { createClient } from '@/lib/supabase/client';
 import { V3AuctionState, V3AuctionLot, V3Player } from '@/lib/v3-auction-types';
 import { isBotTradeWindowOpen } from '@/lib/trade/bot-cycle-policy';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 
 interface AuctionContextValue {
   state: V3AuctionState;
@@ -52,7 +53,7 @@ export function V3AuctionStateProvider({ roomId, children }: { roomId: string; c
   useEffect(() => {
     const auction = state.auction;
     const miniStatus = state.miniSession?.status ?? null;
-    if (!isHost || !auction?.id || !isBotTradeWindowOpen(auction.status, miniStatus)) return;
+    if (!AUCTION_BOTS_ENABLED || !isHost || !auction?.id || !isBotTradeWindowOpen(auction.status, miniStatus)) return;
 
     let disposed = false;
     let running = false;

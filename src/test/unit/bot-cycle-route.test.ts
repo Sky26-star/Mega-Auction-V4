@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -98,7 +99,19 @@ async function runCycle() {
   }));
 }
 
-describe('bot-cycle route integration without persistent database writes', () => {
+describe('bot-cycle V1 release gate', () => {
+  it.skipIf(AUCTION_BOTS_ENABLED)('returns disabled without reading auth or touching the database', async () => {
+    const response = await runCycle();
+    const result = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(result.error).toContain('deferred');
+    expect(mocks.auth).not.toHaveBeenCalled();
+    expect(mocks.admin.from).not.toHaveBeenCalled();
+  });
+});
+
+describe.skipIf(!AUCTION_BOTS_ENABLED)('bot-cycle route integration without persistent database writes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

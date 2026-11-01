@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import type { Room } from '@/lib/types/room';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import { Crown, Key, ArrowRight, Database, Copy, CheckCircle, Edit, Trash2, Clock, Coins, Cpu } from 'lucide-react';
 
 interface RoomCardProps {
@@ -90,7 +91,7 @@ export function RoomCard({ room, currentUserId, onEdit, onDelete }: RoomCardProp
         </div>
 
         {/* Configuration Summary */}
-        <div className="grid grid-cols-3 gap-1.5 p-2 rounded-xl bg-[#0B0F0D] border border-[#2A312D] text-center text-[11px] font-mono-numbers my-3">
+        <div className={`grid ${AUCTION_BOTS_ENABLED ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 p-2 rounded-xl bg-[#0B0F0D] border border-[#2A312D] text-center text-[11px] font-mono-numbers my-3`}>
           <div>
             <span className="text-[9px] font-bold text-[#9CA6A0] uppercase block">PURSE</span>
             <span className="font-extrabold text-[#E4B93F]">₹{purseCr} Cr</span>
@@ -99,10 +100,12 @@ export function RoomCard({ room, currentUserId, onEdit, onDelete }: RoomCardProp
             <span className="text-[9px] font-bold text-[#9CA6A0] uppercase block">TIMER</span>
             <span className="font-bold text-[#F3F4F1]">{timerSec}s</span>
           </div>
-          <div>
-            <span className="text-[9px] font-bold text-[#9CA6A0] uppercase block">BOTS</span>
-            <span className="font-bold text-[#F3F4F1]">{botCount > 0 ? `${botCount} Bots` : 'Off'}</span>
-          </div>
+          {AUCTION_BOTS_ENABLED && (
+            <div>
+              <span className="text-[9px] font-bold text-[#9CA6A0] uppercase block">BOTS</span>
+              <span className="font-bold text-[#F3F4F1]">{botCount > 0 ? `${botCount} Bots` : 'Off'}</span>
+            </div>
+          )}
         </div>
       </div>
 

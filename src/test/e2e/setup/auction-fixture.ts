@@ -399,18 +399,20 @@ export async function setupDisposableAuction(
     playerSetId?: string;
     roomSettings?: Record<string, any>;
     defaultPurse?: number;
+    botCount?: number;
   }
 ) {
   // 6 char code
   const roomCode = `T${runId.substring(0, 5).toUpperCase()}`;
   
+  const botCount = options?.botCount ?? 3;
   const roomSettings = {
     timer_duration_seconds: 15,
     min_bid_increment: 50,
     default_purse: options?.roomSettings?.default_purse ?? 10000,
     max_squad_size: options?.roomSettings?.max_squad_size ?? 15,
     max_overseas: options?.roomSettings?.max_overseas ?? 8,
-    bot_count: 3,
+    bot_count: botCount,
     bot_difficulty: 'Balanced',
     // Merge any additional settings
     ...(options?.roomSettings || {}),
@@ -447,16 +449,18 @@ export async function setupDisposableAuction(
     { id: 'bot-3', name: 'Bot Bangalore', shortName: 'BB', color: '#FF0000', managerName: 'AI Bangalore' },
   ];
 
-  const { error: botError } = await supabase.rpc('provision_room_bots', {
-    p_room_id: room_id,
-    p_bots: botsPayload,
-  });
+  if (botCount > 0) {
+    const { error: botError } = await supabase.rpc('provision_room_bots', {
+      p_room_id: room_id,
+      p_bots: botsPayload.slice(0, botCount),
+    });
 
-  if (botError) {
-    // Partial setup failure: Room was created, but bots failed.
-    // Clean up the room so it doesn't leak.
-    await supabase.rpc('delete_room', { p_room_id: room_id });
-    throw new Error(`Failed to provision bots: ${botError.message} (Room ${room_id} was cleaned up)`);
+    if (botError) {
+      // Partial setup failure: Room was created, but bots failed.
+      // Clean up the room so it doesn't leak.
+      await supabase.rpc('delete_room', { p_room_id: room_id });
+      throw new Error(`Failed to provision bots: ${botError.message} (Room ${room_id} was cleaned up)`);
+    }
   }
 
   return {

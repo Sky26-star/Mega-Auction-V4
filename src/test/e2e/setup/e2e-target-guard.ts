@@ -12,3 +12,6 @@ process.env.SUPABASE_URL = target.url;
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = target.anonKey;
 process.env.SUPABASE_ANON_KEY = target.anonKey;
 process.env.SUPABASE_SERVICE_ROLE_KEY = target.serviceRoleKey;
+// A local-only credential for the Playwright webServer's protected tick route.
+// The test app is bound to the guarded disposable Supabase target above.
+process.env.AUCTION_TICK_SECRET = 'human-only-e2e-tick-secret-'.padEnd(48, 'x');

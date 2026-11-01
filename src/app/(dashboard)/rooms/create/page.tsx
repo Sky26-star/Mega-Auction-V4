@@ -8,6 +8,7 @@ import { Navbar } from '@/components/layout/navbar';
 import { createRoom, generateRandomCode, generateUniqueRoomCode } from '@/lib/rooms';
 import { getPlayerSets } from '@/lib/player-sets';
 import { createRoomSchema } from '@/lib/validations/room';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import type { PlayerSet } from '@/lib/types/player-set';
 import { CreateRoomPreview } from '@/components/rooms/create-room-preview';
 import { PlayerSetCombobox } from '@/components/rooms/player-set-combobox';
@@ -120,7 +121,7 @@ export default function CreateRoomPage() {
     e.preventDefault();
     setFormError(null);
 
-    const activeBotCount = enableBots ? botCount : 0;
+    const activeBotCount = AUCTION_BOTS_ENABLED && enableBots ? botCount : 0;
 
     // Note: min_bid_increment = 50 is provided ONLY as a backward-compatible placeholder for existing RPC schema
     const validation = createRoomSchema.safeParse({
@@ -347,6 +348,10 @@ export default function CreateRoomPage() {
                 </div>
               </div>
 
+              {!AUCTION_BOTS_ENABLED && (
+                <p className="text-xs text-[#9CA6A0]">V1 rooms are human-only. Bot opponents are planned for a later update.</p>
+              )}
+
               {/* -------------------------------------------------------------
                   SECTION 2 — PLAYER SET POOL
                  ------------------------------------------------------------- */}
@@ -550,6 +555,7 @@ export default function CreateRoomPage() {
               {/* -------------------------------------------------------------
                   SECTION 4 — BOT OPPONENTS
                  ------------------------------------------------------------- */}
+              {AUCTION_BOTS_ENABLED && (
               <div className="p-6 sm:p-7 rounded-2xl bg-[#141917] border-2 border-[#2A312D] shadow-xl space-y-5">
                 <div className="flex items-center justify-between pb-3 border-b border-[#2A312D]">
                   <div className="flex items-center space-x-2.5">
@@ -619,6 +625,7 @@ export default function CreateRoomPage() {
                   </div>
                 )}
               </div>
+              )}
 
               {/* -------------------------------------------------------------
                   SECTION 5 — YOUR FRANCHISE IDENTITY

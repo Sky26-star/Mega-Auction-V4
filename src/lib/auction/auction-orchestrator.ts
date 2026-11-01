@@ -2,6 +2,8 @@ import { evaluateBotsForLot, AuctionContext, computeFutureQualityMap, computeFut
 import { syncBotMemoryWithState, clearInactiveAuctionMemory } from '@/lib/auction/bot-brain-memory';
 import { updateBotBrainState, clearInactiveBrainStateCache } from '@/lib/auction/bot-brain-state';
 import { submitBotBid } from '@/lib/auction/bot-bid-submission';
+import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import crypto from 'crypto';
 
 // Ephemeral Process-Local Evidence Store (Phase 14)
@@ -36,8 +38,9 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         const { data: closeRes, error: closeErr } = await supabase.rpc('v3_close_mini_selection', {
           p_auction_id: session.auction_id
         });
-        if (closeErr) {
-          console.error(`[MINI_TICKER] Failed to close mini selection for auction ${session.auction_id}:`, closeErr);
+        const closeFailure = getAuctionRpcFailure(closeRes, closeErr, 'RPC returned no successful result.');
+        if (closeFailure) {
+          console.error(`[MINI_TICKER] Failed to close mini selection for auction ${session.auction_id}:`, closeFailure);
         } else {
           console.log(`[MINI_TICKER] Closed mini selection for auction ${session.auction_id}:`, closeRes);
           actionsTaken.push({ auction: session.auction_id, action: 'CLOSE_MINI_SELECTION', result: closeRes });
@@ -116,9 +119,10 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
               p_force: true
             });
 
-            if (closeError || (data && !data.success)) {
-              console.error(`[TICKER] Failed to close mini selection for ${auction.id}:`, closeError || data?.error);
-              actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION_FAILED', error: closeError?.message || data?.error });
+            const closeFailure = getAuctionRpcFailure(data, closeError, 'RPC returned no successful result.');
+            if (closeFailure) {
+              console.error(`[TICKER] Failed to close mini selection for ${auction.id}:`, closeFailure);
+              actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION_FAILED', error: closeFailure });
             } else {
               console.log(`[TICKER] Closed mini selection for ${auction.id} after timeout`);
               actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION' });
@@ -126,9 +130,10 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
               // Automatically start the Mini Auction if there are valid nominations
               if (data.total_lots > 0) {
                 const { data: startData, error: startError } = await supabase.rpc('v3_start_mini_auction', { p_auction_id: auction.id });
-                if (startError || (startData && !startData.success)) {
-                  console.error(`[TICKER] Failed to auto-start mini auction for ${auction.id}:`, startError || startData?.error);
-                  actionsTaken.push({ auction: auction.id, action: 'START_MINI_AUCTION_FAILED', error: startError?.message || startData?.error });
+                const startFailure = getAuctionRpcFailure(startData, startError, 'RPC returned no successful result.');
+                if (startFailure) {
+                  console.error(`[TICKER] Failed to auto-start mini auction for ${auction.id}:`, startFailure);
+                  actionsTaken.push({ auction: auction.id, action: 'START_MINI_AUCTION_FAILED', error: startFailure });
                 } else {
                   console.log(`[TICKER] Auto-started mini auction for ${auction.id}`);
                   actionsTaken.push({ auction: auction.id, action: 'START_MINI_AUCTION' });
@@ -195,8 +200,15 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           continue;
         }
 
+        const startFailure = getAuctionRpcFailure(data, error, 'RPC returned no successful result.');
+        if (startFailure) {
+          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=FAILED\nreason=${startFailure}`);
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING_FAILED', error: startFailure });
+          continue;
+        }
+
         console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=APPLIED`);
-        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING', error: error?.message });
+        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING' });
         continue; // Processed this lot for this tick
       } else if (lot.status === 'GET_READY') {
         console.error(`[GET_READY_WAIT] lot=${lot.id} now=${now} expiresAt=${getReadyExpiresAt} diff=${getReadyExpiresAt - now}`);
@@ -231,12 +243,19 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           continue;
         }
 
+        const finalizeFailure = getAuctionRpcFailure(data, error, 'RPC returned no successful result.');
+        if (finalizeFailure) {
+          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=FAILED\nreason=${finalizeFailure}`);
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT_FAILED', error: finalizeFailure });
+          continue;
+        }
+
         console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=APPLIED`);
-        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT', error: error?.message });
+        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT' });
         continue; // Processed this lot for this tick
       }
 
-      if (lot.status === 'BIDDING' && timerExpiresAt && now < timerExpiresAt) {
+      if (AUCTION_BOTS_ENABLED && lot.status === 'BIDDING' && timerExpiresAt && now < timerExpiresAt) {
         // Bot evaluation time
         // Need Room Settings, Bot Teams, All Teams, Active Squad Players, and future lots for context
         const [{ data: room }, { data: allTeamsData }, { data: allLots }, { data: squadPlayersData }] = await Promise.all([
@@ -338,14 +357,32 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         const botTeams = allTeams.filter((t: any) => t.is_bot);
         if (botTeams.length === 0) continue;
 
+        // Permanent drops are persisted per auction lot so a worker restart or
+        // a second server instance cannot make that bot re-enter this player.
+        const { data: lotBotStates, error: lotBotStateError } = await (supabase as any)
+          .from('bot_lot_state')
+          .select('team_id, is_dropped')
+          .eq('lot_id', lot.id)
+          .eq('is_dropped', true);
+        if (lotBotStateError) {
+          console.error(`[BOT DROP STATE ERROR] auction=${auction.id} lot=${lot.id}`, lotBotStateError.message);
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'BOT_EVALUATION_SKIPPED', error: 'BOT_DROP_STATE_UNAVAILABLE' });
+          continue;
+        }
+        const permanentlyDroppedTeamIds = new Set<string>(
+          ((lotBotStates || []) as Array<{ team_id: string }>).map((state) => state.team_id)
+        );
+        const activeBotTeams = botTeams.filter((bot: any) => !permanentlyDroppedTeamIds.has(bot.id));
+        if (activeBotTeams.length === 0) continue;
+
         // Sync memory for all bots before evaluation
-        for (const bot of botTeams) {
+        for (const bot of activeBotTeams) {
           syncBotMemoryWithState(auction.id, bot.id, auction.current_lot_id, allLots);
         }
 
         // Calculate BotBrainState (beliefs + plan) for each bot
         const player = lot.players as any;
-        for (const bot of botTeams) {
+        for (const bot of activeBotTeams) {
           try {
             const brainState = updateBotBrainState({
               auctionId: auction.id,
@@ -379,7 +416,7 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         const effectiveCurrentBid = lot.highest_bidder_team_id ? lot.current_bid : 0;
         const outEvidenceLog: BotDecisionEvidence[] = [];
         const validBids = evaluateBotsForLot(
-          botTeams,
+          activeBotTeams,
           player,
           effectiveCurrentBid,
           lot.base_price,
@@ -392,6 +429,23 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           outEvidenceLog,
           auction.id
         );
+
+        // Persist only the authoritative hard-ceiling DROP. Tactical PASS and
+        // temporary opt-outs remain eligible for reevaluation on later ticks.
+        for (const drop of outEvidenceLog.filter((entry) => entry.permanentDrop)) {
+          const { data: dropResult, error: dropError } = await supabase.rpc('v3_mark_bot_drop' as any, {
+            p_auction_id: auction.id,
+            p_lot_id: lot.id,
+            p_team_id: drop.teamId,
+            p_maximum_bid: Math.max(0, Math.floor(drop.maximumBid ?? 0)),
+          } as any);
+          if (dropError || !dropResult?.success) {
+            drop.decision = 'PASS';
+            drop.permanentDrop = false;
+            drop.actionReason = 'DROP_PERSISTENCE_FAILED';
+            console.error(`[BOT DROP PERSISTENCE ERROR] auction=${auction.id} lot=${lot.id} team=${drop.teamId}`, dropError?.message || dropResult?.error || 'Unknown error');
+          }
+        }
 
         // Store evidence (latest-write-wins per tick)
         const evidenceKey = `${auction.id}_${lot.id}`;
@@ -410,13 +464,16 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           const requestId = crypto.randomUUID();
 
           const { data, error, rpcError, acceptedAmount, persistedAmount, isApplied } = await submitBotBid(
-            () => supabase.rpc('v3_place_bid', {
+            () => supabase.rpc('v3_place_bot_bid' as any, {
               p_auction_id: auction.id,
               p_lot_id: lot.id,
               p_team_id: bid.teamId,
               p_request_id: requestId,
-              p_is_bot: true
-            }),
+              p_expected_current_bid: bid.expectedCurrentBid,
+              p_expected_highest_bidder_team_id: bid.expectedHighestBidderTeamId,
+              p_expected_next_bid_amount: bid.expectedNextBidAmount,
+              p_maximum_bid: bid.maximumBid,
+            } as any),
             {
               auctionId: auction.id,
               teamId: bid.teamId,

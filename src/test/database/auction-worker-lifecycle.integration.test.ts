@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import { executeAuctionTick } from '@/lib/auction/auction-orchestrator';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import { resolveDisposableDatabaseTarget } from './disposable-db-guard';
 
 const disposableDatabase = resolveDisposableDatabaseTarget(process.env);
@@ -27,7 +28,7 @@ interface SchemaFingerprint {
 }
 
 async function computeTableFingerprints(c: Client): Promise<Record<string, TableFingerprint>> {
-  const tables = ['profiles', 'rooms', 'auctions', 'teams', 'room_participants', 'auction_lots', 'bids'];
+  const tables = ['profiles', 'rooms', 'auctions', 'teams', 'room_participants', 'auction_lots', 'bids', 'bot_lot_state', 'squad_players'];
   const result: Record<string, TableFingerprint> = {};
 
   for (const table of tables) {
@@ -50,7 +51,7 @@ async function computeSchemaFingerprints(c: Client): Promise<SchemaFingerprint> 
     FROM pg_proc p
     JOIN pg_namespace n ON p.pronamespace = n.oid
     WHERE n.nspname = 'public'
-      AND p.proname IN ('v3_place_bid', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
+      AND p.proname IN ('v3_place_bid', 'v3_place_bot_bid', 'v3_mark_bot_drop', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
     ORDER BY p.proname, args;
   `);
   const funcHasher = crypto.createHash('sha256');
@@ -62,7 +63,7 @@ async function computeSchemaFingerprints(c: Client): Promise<SchemaFingerprint> 
     SELECT routine_name, specific_name, grantee, privilege_type 
     FROM information_schema.routine_privileges 
     WHERE specific_schema = 'public' 
-      AND routine_name IN ('v3_place_bid', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
+      AND routine_name IN ('v3_place_bid', 'v3_place_bot_bid', 'v3_mark_bot_drop', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
     ORDER BY routine_name, specific_name, grantee, privilege_type;
   `);
   const privHasher = crypto.createHash('sha256');
@@ -87,12 +88,19 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
   const roomId = randomUUID();
   const auctionId = randomUUID();
   const hostUserId = randomUUID();
+  const secondHumanUserId = randomUUID();
   const botTeamId = randomUUID();
+  const comparisonBotTeamId = randomUUID();
   const humanTeamId = randomUUID();
+  const secondHumanTeamId = randomUUID();
   const playerId1 = randomUUID();
   const playerId2 = randomUUID();
+  const unsoldPlayerId = randomUUID();
   const lotId1 = randomUUID();
   const lotId2 = randomUUID();
+  const unsoldLotId = randomUUID();
+  const saturatedBowlerPlayerIds = Array.from({ length: 12 }, () => randomUUID());
+  const saturatedBowlerLotIds = Array.from({ length: 12 }, () => randomUUID());
   const playerSetId = '00000000-0000-0000-0000-000000000202';
 
   beforeAll(async () => {
@@ -114,20 +122,24 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
       );
     }
 
-    // 1. Capture baseline fingerprints before test fixture creation
-    initialTableFingerprints = await computeTableFingerprints(pgClient);
-    initialSchemaFingerprints = await computeSchemaFingerprints(pgClient);
-
-    // 2. Ensure hardening migration is active
+    // 1. Ensure the exact RPC migrations are active before taking the baseline.
     const migrationPath = path.resolve(process.cwd(), 'supabase/migrations/20261022100000_auction_rpc_security_hardening.sql');
     let sql = fs.readFileSync(migrationPath, 'utf8');
     await pgClient.query(sql);
 
-    // 3. Insert test fixtures directly into database
+    const botGuardMigrationPath = path.resolve(process.cwd(), 'supabase/migrations/20261025160000_guard_stale_bot_bids_and_drops.sql');
+    await pgClient.query(fs.readFileSync(botGuardMigrationPath, 'utf8'));
+
+    // 2. Capture baseline fingerprints before test fixture creation.
+    initialTableFingerprints = await computeTableFingerprints(pgClient);
+    initialSchemaFingerprints = await computeSchemaFingerprints(pgClient);
+
+    // 3. Insert test fixtures directly into database.
     await pgClient.query(`
       INSERT INTO public.profiles (id, username, display_name)
-      VALUES ($1, 'worker_host_user', 'Worker Host User');
-    `, [hostUserId]);
+      VALUES ($1, 'worker_host_user', 'Worker Host User'),
+             ($2, 'worker_second_user', 'Worker Second User');
+    `, [hostUserId, secondHumanUserId]);
 
     await pgClient.query(`
       INSERT INTO public.rooms (id, name, code, host_id, settings, status)
@@ -142,16 +154,20 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
     await pgClient.query(`
       INSERT INTO public.teams (id, auction_id, name, short_name, purse, initial_purse, is_bot, players_bought, overseas_count)
       VALUES 
-        ($1, $3, 'Worker Human Team', 'WHT', 10000, 10000, false, 0, 0),
-        ($2, $3, 'Worker Bot Team', 'WBT', 10000, 10000, true, 0, 0);
-    `, [humanTeamId, botTeamId, auctionId]);
+        ($1, $4, 'Worker Host Team', 'WHT', 10000, 10000, false, 0, 0),
+        ($2, $4, 'Worker Bot Team', 'WBT', 10000, 10000, true, 0, 0),
+        ($3, $4, 'Comparison Bot Team', 'CBT', 0, 10000, true, 0, 0),
+        ($5, $4, 'Worker Second Human Team', 'WSH', 10000, 10000, false, 0, 0);
+    `, [humanTeamId, botTeamId, comparisonBotTeamId, auctionId, secondHumanTeamId]);
 
     await pgClient.query(`
       INSERT INTO public.room_participants (room_id, user_id, team_id, role, is_bot)
       VALUES 
         ($1, $2, $3, 'HOST', false),
-        ($1, NULL, $4, 'MEMBER', true);
-    `, [roomId, hostUserId, humanTeamId, botTeamId]);
+        ($1, NULL, $4, 'MEMBER', true),
+        ($1, NULL, $5, 'MEMBER', true),
+        ($1, $6, $7, 'MEMBER', false);
+    `, [roomId, hostUserId, humanTeamId, botTeamId, comparisonBotTeamId, secondHumanUserId, secondHumanTeamId]);
 
     await pgClient.query(`
       INSERT INTO public.players (id, player_set_id, name, role, base_price, is_overseas)
@@ -182,8 +198,9 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
       if (pgConnected) {
         // Cleanly delete fixtures cascading from room
         await pgClient.query(`DELETE FROM public.rooms WHERE id = $1;`, [roomId]);
-        await pgClient.query(`DELETE FROM public.players WHERE id IN ($1, $2);`, [playerId1, playerId2]);
-        await pgClient.query(`DELETE FROM public.profiles WHERE id = $1;`, [hostUserId]);
+        await pgClient.query(`DELETE FROM public.players WHERE id IN ($1, $2, $3);`, [playerId1, playerId2, unsoldPlayerId]);
+        await pgClient.query(`DELETE FROM public.players WHERE id = ANY($1::uuid[]);`, [saturatedBowlerPlayerIds]);
+        await pgClient.query(`DELETE FROM public.profiles WHERE id = ANY($1::uuid[]);`, [[hostUserId, secondHumanUserId]]);
 
         // Verify database state is 100% restored to baseline fingerprints
         const postTableFingerprints = await computeTableFingerprints(pgClient);
@@ -206,9 +223,12 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
     }
   }, 30000);
 
-  it('1. Worker tick detects expired GET_READY lot and transitions it to BIDDING', async () => {
-    // Invoke real executeAuctionTick with server-side service-role client
-    const tickResult = await executeAuctionTick(supabase);
+  it('1. Fresh worker instance resumes the persisted expired GET_READY timer after restart', async () => {
+    // A new worker client has no in-memory timer state; it must rebuild state from the database.
+    const restartedWorker = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const tickResult = await executeAuctionTick(restartedWorker);
 
     const startAction = tickResult.actions.find(
       (a: any) => a.auction === auctionId && a.lot === lotId1 && a.action === 'START_BIDDING'
@@ -221,7 +241,7 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
     expect(new Date(lotRes.rows[0].timer_expires_at).getTime()).toBeGreaterThan(Date.now());
   }, 30000);
 
-  it('2. Worker tick evaluates bot candidates and submits authoritative bot bid via service-role RPC', async () => {
+  it.skipIf(!AUCTION_BOTS_ENABLED)('2. Worker tick evaluates bot candidates and submits authoritative bot bid via service-role RPC', async () => {
     // Ensure sufficient time has elapsed for bot reaction delay (delayMs is typically 500-1200ms)
     await pgClient.query(`
       UPDATE public.auction_lots 
@@ -268,16 +288,19 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
     expect(lotRes.rows[0].status).toBe('BIDDING');
   }, 30000);
 
-  it('4. Worker tick finalizes lot upon timer expiration, records sale, updates purse/squad, and advances to next lot', async () => {
-    // Simulate timer expiration on lot 1
+  it('4. Fresh worker instance finalizes the persisted expired BIDDING timer and advances the next lot', async () => {
+    // Simulate a deadline that expired while the prior worker was offline.
     await pgClient.query(`
       UPDATE public.auction_lots
       SET timer_expires_at = clock_timestamp() - INTERVAL '2 seconds'
       WHERE id = $1;
     `, [lotId1]);
 
-    // Invoke executeAuctionTick
-    const tickResult = await executeAuctionTick(supabase);
+    // A fresh worker client recovers the expired deadline from the database.
+    const restartedWorker = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const tickResult = await executeAuctionTick(restartedWorker);
 
     const finAction = tickResult.actions.find(
       (a: any) => a.auction === auctionId && a.lot === lotId1 && a.action === 'FINALIZE_LOT'
@@ -309,5 +332,156 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
     const auctionRes = await pgClient.query(`SELECT current_lot_id, current_lot_index FROM public.auctions WHERE id = $1;`, [auctionId]);
     expect(auctionRes.rows[0].current_lot_id).toBe(lotId2);
     expect(auctionRes.rows[0].current_lot_index).toBe(2);
+  }, 30000);
+
+  it.skipIf(!AUCTION_BOTS_ENABLED)('5. Real worker tick preserves NOT_COMMITTED as PASS for a redundant role without persisting DROP', async () => {
+    for (let i = 0; i < saturatedBowlerPlayerIds.length; i += 1) {
+      const playerId = saturatedBowlerPlayerIds[i]!;
+      const historicalLotId = saturatedBowlerLotIds[i]!;
+      await pgClient.query(`
+        INSERT INTO public.players (id, player_set_id, name, role, base_price, is_overseas)
+        VALUES ($1, $2, $3, 'BOWLER', 100, false);
+      `, [playerId, playerSetId, `Existing Bot Bowler ${i + 1}`]);
+      await pgClient.query(`
+        INSERT INTO public.auction_lots (
+          id, auction_id, lot_index, player_id, base_price, current_bid, status,
+          timer_duration_seconds, winning_team_id, winning_bid
+        ) VALUES ($1, $2, $3, $4, 100, 100, 'SOLD', 15, $5, 100);
+      `, [historicalLotId, auctionId, i + 3, playerId, botTeamId]);
+      await pgClient.query(`
+        INSERT INTO public.squad_players (auction_id, team_id, player_id, lot_id, purchase_price)
+        VALUES ($1, $2, $3, $4, 100);
+      `, [auctionId, botTeamId, playerId, historicalLotId]);
+    }
+
+    await pgClient.query(`
+      UPDATE public.teams SET purse = 8600, players_bought = 13, overseas_count = 0 WHERE id = $1;
+    `, [botTeamId]);
+    await pgClient.query(`
+      UPDATE public.auctions SET current_lot_id = $1, current_lot_index = 2 WHERE id = $2;
+    `, [lotId2, auctionId]);
+    await pgClient.query(`
+      UPDATE public.auction_lots
+         SET status = 'BIDDING', current_bid = 0, highest_bidder_team_id = NULL,
+             timer_expires_at = clock_timestamp() + INTERVAL '10 seconds'
+       WHERE id = $1;
+    `, [lotId2]);
+
+    const tickResult = await executeAuctionTick(supabase);
+    const evidenceStore = (globalThis as any).__ephemeralEvidenceStore as Map<string, any[]>;
+    const botEvidence = evidenceStore.get(`${auctionId}_${lotId2}`)?.find((entry) => entry.teamId === botTeamId);
+
+    expect(botEvidence).toMatchObject({
+      strategicCommitment: 'NOT_COMMITTED',
+      finalAction: 'PASS',
+      decision: 'PASS',
+      permanentDrop: false,
+    });
+    expect(tickResult.actions.some((action: any) => action.lot === lotId2 && action.action === 'BOT_BID')).toBe(false);
+
+    const bidRows = await pgClient.query(`SELECT id FROM public.bids WHERE lot_id = $1;`, [lotId2]);
+    const dropRows = await pgClient.query(`SELECT id FROM public.bot_lot_state WHERE lot_id = $1 AND team_id = $2 AND is_dropped = true;`, [lotId2, botTeamId]);
+    expect(bidRows.rows).toHaveLength(0);
+    expect(dropRows.rows).toHaveLength(0);
+  }, 30000);
+
+  it.skipIf(!AUCTION_BOTS_ENABLED)('6. Real worker gives different decisions to bots with different purses and rosters', async () => {
+    await pgClient.query(`
+      UPDATE public.teams SET purse = 10000, players_bought = 0, overseas_count = 0 WHERE id = $1;
+    `, [comparisonBotTeamId]);
+
+    const tickResult = await executeAuctionTick(supabase);
+    const evidenceStore = (globalThis as any).__ephemeralEvidenceStore as Map<string, any[]>;
+    const decisions = evidenceStore.get(`${auctionId}_${lotId2}`) || [];
+    const rosteredBot = decisions.find((entry) => entry.teamId === botTeamId);
+    const openRosterBot = decisions.find((entry) => entry.teamId === comparisonBotTeamId);
+
+    expect(rosteredBot).toMatchObject({
+      strategicCommitment: 'NOT_COMMITTED',
+      finalAction: 'PASS',
+      permanentDrop: false,
+    });
+    expect(openRosterBot).toMatchObject({ finalAction: 'BID', permanentDrop: false });
+    expect(openRosterBot.strategicCommitment).not.toBe('NOT_COMMITTED');
+    expect(tickResult.actions.some((action: any) => action.lot === lotId2 && action.team === comparisonBotTeamId && action.action === 'BOT_BID' && action.result === 'APPLIED')).toBe(true);
+
+    const bidRows = await pgClient.query(`SELECT team_id, amount FROM public.bids WHERE lot_id = $1;`, [lotId2]);
+    expect(bidRows.rows).toEqual([{ team_id: comparisonBotTeamId, amount: 200 }]);
+  }, 30000);
+
+  it.skipIf(!AUCTION_BOTS_ENABLED)('7. Two humans and bots complete an outbid, worker finalization, and sale', async () => {
+    const humanBid = await pgClient.query(`
+      SELECT public.v3_place_bid($1, $2, $3, $4, false) AS res;
+    `, [auctionId, lotId2, secondHumanTeamId, randomUUID()]);
+    expect(humanBid.rows[0].res).toMatchObject({ success: true, amount: 225 });
+
+    await pgClient.query(`
+      UPDATE public.auction_lots SET timer_expires_at = clock_timestamp() - INTERVAL '2 seconds' WHERE id = $1;
+    `, [lotId2]);
+    const tickResult = await executeAuctionTick(supabase);
+    expect(tickResult.actions.some((action: any) => action.lot === lotId2 && action.action === 'FINALIZE_LOT')).toBe(true);
+
+    const soldLot = await pgClient.query(`
+      SELECT status, winning_team_id, winning_bid FROM public.auction_lots WHERE id = $1;
+    `, [lotId2]);
+    expect(soldLot.rows[0]).toMatchObject({ status: 'SOLD', winning_team_id: secondHumanTeamId, winning_bid: 225 });
+    const winningTeam = await pgClient.query(`SELECT purse, players_bought FROM public.teams WHERE id = $1;`, [secondHumanTeamId]);
+    expect(winningTeam.rows[0]).toMatchObject({ purse: 9775, players_bought: 1 });
+    const squadPlayer = await pgClient.query(`SELECT team_id, player_id, purchase_price FROM public.squad_players WHERE lot_id = $1;`, [lotId2]);
+    expect(squadPlayer.rows).toEqual([{ team_id: secondHumanTeamId, player_id: playerId2, purchase_price: 225 }]);
+    const auctionState = await pgClient.query(`SELECT status FROM public.auctions WHERE id = $1;`, [auctionId]);
+    expect(auctionState.rows[0].status).toBe('COMPLETED');
+  }, 30000);
+
+  it('8. Authoritative state safely returns a completed auction with no active lot', async () => {
+    await pgClient.query(`
+      UPDATE public.auctions
+         SET status = 'COMPLETED', current_lot_id = NULL, current_lot_index = 999
+       WHERE id = $1;
+    `, [auctionId]);
+
+    const stateResult = await supabase.rpc('get_authoritative_auction_state', { p_room_id: roomId });
+
+    expect(stateResult.error).toBeNull();
+    expect(stateResult.data).toMatchObject({
+      success: true,
+      status: 'COMPLETED',
+      auctionId,
+      lotId: null,
+      playerId: null,
+      currentBid: 0,
+      lotStatus: 'PENDING',
+      player_stats: null,
+    });
+  }, 30000);
+
+  it('9. An expired lot with no bidders becomes UNSOLD and opens the mini-auction phase', async () => {
+    await pgClient.query(`
+      INSERT INTO public.players (id, player_set_id, name, role, base_price, is_overseas)
+      VALUES ($1, $2, 'Worker Unsold Player', 'BOWLER', 200, false);
+    `, [unsoldPlayerId, playerSetId]);
+    await pgClient.query(`
+      INSERT INTO public.auction_lots (
+        id, auction_id, lot_index, player_id, base_price, current_bid, status,
+        timer_duration_seconds, timer_expires_at
+      ) VALUES ($1, $2, 1000, $3, 200, 200, 'BIDDING', 15, clock_timestamp() - INTERVAL '2 seconds');
+    `, [unsoldLotId, auctionId, unsoldPlayerId]);
+    await pgClient.query(`
+      UPDATE public.auctions
+         SET status = 'IN_PROGRESS', current_lot_id = $1, current_lot_index = 1000
+       WHERE id = $2;
+    `, [unsoldLotId, auctionId]);
+
+    const finalize = await pgClient.query(`
+      SELECT public.v3_finalize_and_advance_lot($1, $2, false) AS res;
+    `, [auctionId, unsoldLotId]);
+    expect(finalize.rows[0].res).toMatchObject({ success: true, status: 'UNSOLD', auction_status: 'MINI_AUCTION' });
+
+    const lotState = await pgClient.query(`SELECT status FROM public.auction_lots WHERE id = $1;`, [unsoldLotId]);
+    const auctionState = await pgClient.query(`SELECT status, current_lot_id FROM public.auctions WHERE id = $1;`, [auctionId]);
+    const miniState = await pgClient.query(`SELECT status FROM public.mini_auction_sessions WHERE auction_id = $1;`, [auctionId]);
+    expect(lotState.rows[0].status).toBe('UNSOLD');
+    expect(auctionState.rows[0]).toMatchObject({ status: 'MINI_AUCTION', current_lot_id: null });
+    expect(miniState.rows[0].status).toBe('SETUP');
   }, 30000);
 });
