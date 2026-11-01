@@ -357,32 +357,14 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         const botTeams = allTeams.filter((t: any) => t.is_bot);
         if (botTeams.length === 0) continue;
 
-        // Permanent drops are persisted per auction lot so a worker restart or
-        // a second server instance cannot make that bot re-enter this player.
-        const { data: lotBotStates, error: lotBotStateError } = await (supabase as any)
-          .from('bot_lot_state')
-          .select('team_id, is_dropped')
-          .eq('lot_id', lot.id)
-          .eq('is_dropped', true);
-        if (lotBotStateError) {
-          console.error(`[BOT DROP STATE ERROR] auction=${auction.id} lot=${lot.id}`, lotBotStateError.message);
-          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'BOT_EVALUATION_SKIPPED', error: 'BOT_DROP_STATE_UNAVAILABLE' });
-          continue;
-        }
-        const permanentlyDroppedTeamIds = new Set<string>(
-          ((lotBotStates || []) as Array<{ team_id: string }>).map((state) => state.team_id)
-        );
-        const activeBotTeams = botTeams.filter((bot: any) => !permanentlyDroppedTeamIds.has(bot.id));
-        if (activeBotTeams.length === 0) continue;
-
         // Sync memory for all bots before evaluation
-        for (const bot of activeBotTeams) {
+        for (const bot of botTeams) {
           syncBotMemoryWithState(auction.id, bot.id, auction.current_lot_id, allLots);
         }
 
         // Calculate BotBrainState (beliefs + plan) for each bot
         const player = lot.players as any;
-        for (const bot of activeBotTeams) {
+        for (const bot of botTeams) {
           try {
             const brainState = updateBotBrainState({
               auctionId: auction.id,
@@ -416,7 +398,7 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         const effectiveCurrentBid = lot.highest_bidder_team_id ? lot.current_bid : 0;
         const outEvidenceLog: BotDecisionEvidence[] = [];
         const validBids = evaluateBotsForLot(
-          activeBotTeams,
+          botTeams,
           player,
           effectiveCurrentBid,
           lot.base_price,
@@ -429,23 +411,6 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           outEvidenceLog,
           auction.id
         );
-
-        // Persist only the authoritative hard-ceiling DROP. Tactical PASS and
-        // temporary opt-outs remain eligible for reevaluation on later ticks.
-        for (const drop of outEvidenceLog.filter((entry) => entry.permanentDrop)) {
-          const { data: dropResult, error: dropError } = await supabase.rpc('v3_mark_bot_drop' as any, {
-            p_auction_id: auction.id,
-            p_lot_id: lot.id,
-            p_team_id: drop.teamId,
-            p_maximum_bid: Math.max(0, Math.floor(drop.maximumBid ?? 0)),
-          } as any);
-          if (dropError || !dropResult?.success) {
-            drop.decision = 'PASS';
-            drop.permanentDrop = false;
-            drop.actionReason = 'DROP_PERSISTENCE_FAILED';
-            console.error(`[BOT DROP PERSISTENCE ERROR] auction=${auction.id} lot=${lot.id} team=${drop.teamId}`, dropError?.message || dropResult?.error || 'Unknown error');
-          }
-        }
 
         // Store evidence (latest-write-wins per tick)
         const evidenceKey = `${auction.id}_${lot.id}`;
@@ -464,16 +429,13 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           const requestId = crypto.randomUUID();
 
           const { data, error, rpcError, acceptedAmount, persistedAmount, isApplied } = await submitBotBid(
-            () => supabase.rpc('v3_place_bot_bid' as any, {
+            () => supabase.rpc('v3_place_bid', {
               p_auction_id: auction.id,
               p_lot_id: lot.id,
               p_team_id: bid.teamId,
               p_request_id: requestId,
-              p_expected_current_bid: bid.expectedCurrentBid,
-              p_expected_highest_bidder_team_id: bid.expectedHighestBidderTeamId,
-              p_expected_next_bid_amount: bid.expectedNextBidAmount,
-              p_maximum_bid: bid.maximumBid,
-            } as any),
+              p_is_bot: true
+            }),
             {
               auctionId: auction.id,
               teamId: bid.teamId,
