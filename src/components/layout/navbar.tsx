@@ -36,7 +36,7 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
               <div className="w-8 h-8 rounded-lg bg-[#E4B93F] flex items-center justify-center shadow-[0_0_15px_rgba(228,185,63,0.3)] group-hover:shadow-[0_0_20px_rgba(228,185,63,0.5)] transition-all">
                 <Gavel className="w-5 h-5 text-[#0B0F0D]" />
               </div>
-              <span className={`${auctionRoom ? 'hidden whitespace-nowrap xl:inline' : ''} text-lg font-black uppercase tracking-widest text-[#F3F4F1] drop-shadow-md transition-colors group-hover:text-[#E4B93F]`}>
+              <span className={`${auctionRoom ? 'hidden xl:inline' : ''} whitespace-nowrap text-sm sm:text-lg font-black uppercase tracking-widest text-[#F3F4F1] drop-shadow-md transition-colors group-hover:text-[#E4B93F]`}>
                 Mega <span className="text-[#C9A227]">Auction</span>
               </span>
             </Link>
@@ -65,16 +65,15 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
               <div className="h-8 w-24 bg-[#181E1A] animate-pulse rounded-lg"></div>
             ) : isSignedIn ? (
               <div className={`flex min-w-0 items-center ${auctionRoom ? 'gap-2 xl:gap-4' : 'space-x-4'}`}>
-                {auctionRoom && (
-                  <details className="relative xl:hidden">
+                  <details className={auctionRoom ? 'relative xl:hidden' : 'relative md:hidden'}>
                     <summary
-                      aria-label="Open room navigation"
+                      aria-label={auctionRoom ? 'Open room navigation' : 'Open account navigation'}
                       className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-lg border border-[#2A312D] bg-[#181E1A] text-[#F3F4F1] hover:border-[#C9A227] hover:text-[#E4B93F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0F0D] [&::-webkit-details-marker]:hidden"
                     >
                       <Menu className="h-5 w-5" aria-hidden="true" />
                     </summary>
                     <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-[#2A312D] bg-[#141917] p-2 shadow-2xl">
-                      <Link href={`/rooms/${roomId}/squad`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">
+                      {roomId && <><Link href={`/rooms/${roomId}/squad`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">
                         <Users className="h-4 w-4 text-[#C9A227]" aria-hidden="true" /> Squad
                       </Link>
                       <Link href={`/rooms/${roomId}/stats`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">
@@ -82,10 +81,11 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
                       </Link>
                       <Link href={`/rooms/${roomId}/trades`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">
                         <ArrowLeftRight className="h-4 w-4 text-[#C9A227]" aria-hidden="true" /> Trades
-                      </Link>
+                      </Link></>}
                       <Link href="/dashboard" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">
                         <LayoutDashboard className="h-4 w-4 text-[#C9A227]" aria-hidden="true" /> Dashboard
                       </Link>
+                      <Link href="/player-sets" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">Player sets</Link>
                       <Link href="/profile" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold text-[#F3F4F1] hover:bg-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]">
                         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#C9A227]/50 bg-[#181E1A] text-[10px] font-extrabold text-[#E4B93F] font-mono-numbers">
                           {displayName.charAt(0).toUpperCase()}
@@ -100,9 +100,8 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
                       </button>
                     </div>
                   </details>
-                )}
 
-                <div className={auctionRoom ? 'hidden items-center space-x-4 xl:flex' : 'flex items-center space-x-4'}>
+                <div className={auctionRoom ? 'hidden items-center space-x-4 xl:flex' : 'hidden items-center space-x-2 lg:space-x-4 md:flex'}>
                 {roomId && (
                   <>
                     <Link
@@ -148,7 +147,7 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
                   <div className="w-6 h-6 rounded-full bg-[#181E1A] border border-[#C9A227]/50 flex items-center justify-center text-[#E4B93F] text-[10px] font-extrabold font-mono-numbers">
                     {displayName.charAt(0).toUpperCase()}
                   </div>
-                  <span>{displayName}</span>
+                  <span className="max-w-[9rem] truncate">{displayName}</span>
                 </Link>
 
                 <button

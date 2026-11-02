@@ -4,6 +4,7 @@
 // Mega Auction — Player Database Control Center Page (V2 UI/UX Redesign)
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { AuctionSelect } from '@/components/ui/auction-select';
 import { Navbar } from '@/components/layout/navbar';
 import { PlayerSetCard } from '@/components/player-sets/player-set-card';
 import { PlayerSetModal } from '@/components/player-sets/player-set-modal';
@@ -18,10 +19,8 @@ import {
   Users,
   Globe,
   Lock,
-  ArrowUpDown,
   Layers,
   AlertCircle,
-  ShieldAlert,
 } from 'lucide-react';
 
 export default function PlayerSetsPage() {
@@ -124,225 +123,69 @@ export default function PlayerSetsPage() {
       });
   }, [playerSets, searchTerm, tabFilter, sortBy, profile]);
 
+  const clearFilters = () => { setSearchTerm(''); setTabFilter('ALL'); };
+  const openCreate = () => { setEditingSet(null); setIsModalOpen(true); };
+  const metrics = [
+    { label: 'Player sets', value: playerSets.length, Icon: Layers },
+    { label: 'Total players', value: totalPlayersCount, Icon: Users },
+    { label: 'Public pools', value: publicSetsCount, Icon: Globe },
+    { label: 'Private pools', value: playerSets.length - publicSetsCount, Icon: Lock },
+  ];
+  const tabs = [
+    { value: 'ALL' as const, label: 'All sets', count: playerSets.length },
+    { value: 'MY_SETS' as const, label: 'My sets', count: mySetsCount },
+    { value: 'PUBLIC' as const, label: 'Public', count: publicSetsCount },
+  ];
+  const createButton = <button type="button" onClick={openCreate} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#C9A227] px-5 text-sm font-bold text-[#0B0F0D] transition-colors hover:bg-[#E4B93F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0F0D]"><PlusCircle className="h-4 w-4" /> Create player set</button>;
+
   return (
-    <div className="min-h-screen bg-[#0B0F0D] text-[#F3F4F1] flex flex-col font-sans">
+    <div className="min-h-screen bg-[#0B0F0D] text-[#F3F4F1]">
       <Navbar />
-
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Hero Header Section */}
-        <div className="w-full rounded-2xl bg-[#141917] border-2 border-[#2A312D] p-6 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
-          <div className="space-y-1.5 z-10 max-w-2xl">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-10 h-10 rounded-xl bg-[#7C3AED]/20 text-[#A855F7] border border-[#7C3AED]/40 flex items-center justify-center flex-shrink-0 shadow-inner">
-                <Database className="w-5 h-5" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-[#F3F4F1] tracking-tight uppercase font-display">
-                PLAYER SETS
-              </h1>
-            </div>
-            <p className="text-xs text-[#9CA6A0] font-medium leading-relaxed">
-              Build and manage your auction player databases. Player sets define the cricket star pools, category tiers, and base prices imported directly into live IPL auction rooms.
-            </p>
+      <main className="mx-auto w-full max-w-7xl space-y-6 px-4 py-7 sm:px-6 sm:py-10 lg:px-8">
+        <header className="flex flex-col justify-between gap-5 border-b border-[#2A312D] pb-7 sm:flex-row sm:items-center">
+          <div className="max-w-xl">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#C9A227]">Auction library</p>
+            <h1 className="text-3xl font-bold uppercase sm:text-4xl">Player <span className="text-[#E4B93F]">sets</span></h1>
+            <p className="mt-3 text-sm leading-relaxed text-[#9CA6A0]">Build your player pool. Set the tiers, shape the competition and bring your next auction to life.</p>
           </div>
-
-          {/* Primary Action Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setEditingSet(null);
-              setIsModalOpen(true);
-            }}
-            className="px-5 py-2.5 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white font-mono font-bold text-xs shadow-lg shadow-purple-950/40 flex items-center space-x-2 transition-all hover:scale-105 active:scale-95 flex-shrink-0"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>CREATE PLAYER SET</span>
-          </button>
-        </div>
-
-        {/* Command-Center Summary Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="p-4 rounded-xl bg-[#141917] border border-[#2A312D] flex items-center space-x-3 shadow-lg">
-            <div className="w-9 h-9 rounded-lg bg-[#7C3AED]/20 text-[#A855F7] border border-[#7C3AED]/30 flex items-center justify-center">
-              <Layers className="w-4.5 h-4.5" />
+          {createButton}
+        </header>
+        <section aria-label="Player library overview" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {metrics.map(({label, value, Icon}) => <div key={label} className="min-w-0 rounded-xl border border-[#2A312D] bg-[#141917] p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-between gap-2"><span className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA6A0]">{label}</span><Icon className="h-4 w-4 shrink-0 text-[#C9A227]" aria-hidden="true" /></div>
+            <p className="font-mono text-2xl font-semibold tabular-nums sm:text-3xl">{isLoading ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-[#242E27]" aria-label="Loading" /> : value.toLocaleString()}</p>
+          </div>)}
+        </section>
+        <section aria-label="Find player sets" className="space-y-4 rounded-xl border border-[#2A312D] bg-[#141917] p-3 sm:p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div role="group" aria-label="Filter player sets" className="grid grid-cols-3 gap-1 rounded-lg border border-[#2A312D] bg-[#0B0F0D] p-1 lg:flex">
+              {tabs.map(tab => <button key={tab.value} type="button" aria-pressed={tabFilter === tab.value} onClick={() => setTabFilter(tab.value)} className={tabFilter === tab.value ? 'flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#C9A227] px-3 text-xs font-semibold text-[#0B0F0D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E4B93F]' : 'flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-xs font-semibold text-[#9CA6A0] hover:bg-[#242E27] hover:text-[#F3F4F1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]'}>{tab.label}<span className="font-mono opacity-70">{tab.count}</span></button>)}
             </div>
-            <div>
-              <span className="block text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-wider">TOTAL SETS</span>
-              <span className="text-lg font-mono font-black text-[#F3F4F1]">{playerSets.length}</span>
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row lg:flex-1 lg:justify-end">
+              <label className="flex min-h-12 min-w-0 items-center gap-2 rounded-lg border border-[#39443B] bg-[#0B0F0D] px-3 focus-within:ring-2 focus-within:ring-[#C9A227] sm:flex-1 lg:max-w-xs">
+                <Search className="h-4 w-4 shrink-0 text-[#9CA6A0]" aria-hidden="true" /><span className="sr-only">Search player sets</span>
+                <input type="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search name or description…" className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none" />
+              </label>
+              <AuctionSelect label="Sort player sets" value={sortBy} onValueChange={value => setSortBy(value as typeof sortBy)} options={[{value:'date_desc',label:'Newest first'},{value:'date_asc',label:'Oldest first'},{value:'name_asc',label:'Name: A to Z'},{value:'players_desc',label:'Most players'}]} className="w-full sm:w-44 sm:shrink-0" />
             </div>
           </div>
-
-          <div className="p-4 rounded-xl bg-[#141917] border border-[#2A312D] flex items-center space-x-3 shadow-lg">
-            <div className="w-9 h-9 rounded-lg bg-indigo-950 text-indigo-400 border border-indigo-800/60 flex items-center justify-center">
-              <Users className="w-4.5 h-4.5" />
-            </div>
-            <div>
-              <span className="block text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-wider">TOTAL PLAYERS</span>
-              <span className="text-lg font-mono font-black text-[#F3F4F1]">{totalPlayersCount}</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#141917] border border-[#2A312D] flex items-center space-x-3 shadow-lg">
-            <div className="w-9 h-9 rounded-lg bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center justify-center">
-              <Globe className="w-4.5 h-4.5" />
-            </div>
-            <div>
-              <span className="block text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-wider">PUBLIC POOLS</span>
-              <span className="text-lg font-mono font-black text-emerald-400">{publicSetsCount}</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#141917] border border-[#2A312D] flex items-center space-x-3 shadow-lg">
-            <div className="w-9 h-9 rounded-lg bg-amber-950 text-amber-400 border border-amber-800/60 flex items-center justify-center">
-              <Lock className="w-4.5 h-4.5" />
-            </div>
-            <div>
-              <span className="block text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-wider">PRIVATE POOLS</span>
-              <span className="text-lg font-mono font-black text-amber-400">{playerSets.length - publicSetsCount}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Filter & Search Toolbar */}
-        <div className="p-4 rounded-2xl bg-[#141917] border border-[#2A312D] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-          {/* Tab Filter */}
-          <div className="flex items-center space-x-1 p-1 rounded-xl bg-[#0B0F0D] border border-[#2A312D]">
-            <button
-              type="button"
-              onClick={() => setTabFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
-                tabFilter === 'ALL'
-                  ? 'bg-[#7C3AED] text-white shadow-md'
-                  : 'text-[#9CA6A0] hover:text-[#F3F4F1]'
-              }`}
-            >
-              ALL SETS ({playerSets.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setTabFilter('MY_SETS')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
-                tabFilter === 'MY_SETS'
-                  ? 'bg-[#7C3AED] text-white shadow-md'
-                  : 'text-[#9CA6A0] hover:text-[#F3F4F1]'
-              }`}
-            >
-              MY SETS ({mySetsCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setTabFilter('PUBLIC')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
-                tabFilter === 'PUBLIC'
-                  ? 'bg-[#7C3AED] text-white shadow-md'
-                  : 'text-[#9CA6A0] hover:text-[#F3F4F1]'
-              }`}
-            >
-              PUBLIC SETS ({publicSetsCount})
-            </button>
-          </div>
-
-          {/* Search & Sort Controls */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 md:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA6A0]" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search player databases..."
-                className="w-full pl-9 pr-4 py-2 rounded-xl bg-[#0B0F0D] border border-[#2A312D] text-[#F3F4F1] placeholder-[#9CA6A0] focus:outline-none focus:border-[#7C3AED] text-xs font-medium transition-all"
-              />
-            </div>
-
-            <div className="flex items-center space-x-1.5 bg-[#0B0F0D] border border-[#2A312D] rounded-xl px-2.5 py-2 text-xs">
-              <ArrowUpDown className="w-3.5 h-3.5 text-[#A855F7]" />
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className="bg-transparent text-[#F3F4F1] focus:outline-none font-mono font-bold text-xs cursor-pointer"
-              >
-                <option value="date_desc" className="bg-[#141917]">NEWEST FIRST</option>
-                <option value="date_asc" className="bg-[#141917]">OLDEST FIRST</option>
-                <option value="name_asc" className="bg-[#141917]">NAME: A TO Z</option>
-                <option value="players_desc" className="bg-[#141917]">MOST PLAYERS</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Error Alert */}
-        {error && (
-          <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start space-x-3 text-red-400 text-xs font-medium">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Player Set Grid / Skeletons / Empty State */}
+        </section>
+        {error && <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300"><AlertCircle className="h-5 w-5 shrink-0" /><span>{error}</span></div>}
+        <div className="flex items-center justify-between gap-3 text-xs text-[#9CA6A0]" aria-live="polite"><p>{isLoading ? 'Loading your library…' : filteredSets.length + ' of ' + playerSets.length + ' player sets'}</p>{(searchTerm || tabFilter !== 'ALL') && <button type="button" onClick={clearFilters} className="min-h-10 rounded px-2 font-semibold text-[#E4B93F] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]">Clear filters</button>}</div>
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-64 rounded-2xl bg-[#141917] border-2 border-[#2A312D] animate-pulse p-5 space-y-4">
-                <div className="w-1/3 h-4 bg-[#222A25] rounded" />
-                <div className="w-full h-8 bg-[#181E1A] rounded" />
-                <div className="w-2/3 h-4 bg-[#181E1A] rounded" />
-              </div>
-            ))}
-          </div>
+          <div aria-label="Loading player sets" className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">{[1,2,3].map(i => <div key={i} className="h-80 animate-pulse space-y-5 rounded-xl border border-[#2A312D] bg-[#141917] p-6"><div className="h-5 w-2/3 rounded bg-[#242E27]" /><div className="h-16 rounded bg-[#181E1A]" /><div className="h-8 rounded bg-[#242E27]" /></div>)}</div>
         ) : filteredSets.length === 0 ? (
-          <div className="p-16 rounded-2xl bg-[#141917] border-2 border-[#2A312D] text-center text-[#9CA6A0] flex flex-col items-center justify-center space-y-4">
-            <div className="w-16 h-16 rounded-2xl bg-[#0B0F0D] border border-[#2A312D] text-[#A855F7] flex items-center justify-center shadow-inner">
-              <ShieldAlert className="w-8 h-8 text-[#A855F7]" />
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-[#F3F4F1] mb-1 uppercase font-display">No Player Databases Yet</h3>
-              <p className="text-xs text-[#9CA6A0] max-w-sm font-medium">
-                Create your first auction player database to populate marquee stars and tier rosters.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingSet(null);
-                setIsModalOpen(true);
-              }}
-              className="px-5 py-2.5 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-mono font-bold shadow-lg shadow-purple-950/40 flex items-center space-x-2 transition-all hover:scale-105"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>CREATE PLAYER SET</span>
-            </button>
+          <div className="flex flex-col items-center rounded-xl border border-dashed border-[#39443B] px-5 py-12 text-center sm:py-16">
+            <Database className="mb-4 h-9 w-9 text-[#C9A227]" />
+            <h2 className="text-2xl font-semibold">{playerSets.length === 0 ? 'Your next auction starts here' : 'No sets match your filters'}</h2>
+            <p className="mb-6 mt-2 max-w-sm text-sm leading-relaxed text-[#9CA6A0]">{playerSets.length === 0 ? 'Create a player set to organize your stars, categories and base prices.' : 'Try another search or browse all available player sets.'}</p>
+            {playerSets.length === 0 ? createButton : <button type="button" onClick={clearFilters} className="min-h-12 rounded-lg border border-[#C9A227]/50 px-5 text-sm font-semibold text-[#E4B93F] hover:bg-[#C9A227]/10">Clear filters</button>}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredSets.map((set) => {
-              const isOwner = profile ? set.created_by === profile.id : false;
-              return (
-                <PlayerSetCard
-                  key={set.id}
-                  playerSet={set}
-                  isOwner={isOwner}
-                  onEdit={(s) => {
-                    setEditingSet(s);
-                    setIsModalOpen(true);
-                  }}
-                  onDelete={handleDeleteSet}
-                />
-              );
-            })}
-          </div>
+          <div className="grid grid-cols-1 items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3">{filteredSets.map(set => <PlayerSetCard key={set.id} playerSet={set} isOwner={profile ? set.created_by === profile.id : false} onEdit={s => { setEditingSet(s); setIsModalOpen(true); }} onDelete={handleDeleteSet} />)}</div>
         )}
       </main>
-
-      {/* Modal */}
-      <PlayerSetModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setEditingSet(null);
-        }}
-        onSubmit={handleCreateOrUpdateSet}
-        initialData={editingSet}
-      />
+      <PlayerSetModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingSet(null); }} onSubmit={handleCreateOrUpdateSet} initialData={editingSet} />
     </div>
   );
 }

@@ -88,7 +88,7 @@ describe('auction report interactions', () => {
 
   it('preserves the selected franchise when realtime updates reorder the teams', () => {
     const { rerender } = render(<SquadPage />);
-    fireEvent.change(screen.getByLabelText('Select franchise'), { target: { value: 'b' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next franchise' }));
     expect(screen.getByRole('heading', { name: 'Mumbai Batter' })).toBeInTheDocument();
     mocks.context.mockReturnValue({
       state: { auction: { id: 'auction-a' }, teams: [teamB, teamA] },
@@ -96,11 +96,11 @@ describe('auction report interactions', () => {
       error: null,
     });
     rerender(<SquadPage />);
-    expect(screen.getByLabelText('Select franchise')).toHaveValue('b');
+    expect(screen.getByRole('combobox', { name: 'Select franchise' })).toHaveTextContent('Mumbai Masters');
     expect(screen.getByRole('heading', { name: 'Mumbai Batter' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Aaron Finch' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Next franchise' }));
-    expect(screen.getByLabelText('Select franchise')).toHaveValue('a');
+    expect(screen.getByRole('combobox', { name: 'Select franchise' })).toHaveTextContent('Chennai Champions');
   });
 
   it('converts stored lakhs consistently across squad and stats money displays', () => {

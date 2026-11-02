@@ -7,6 +7,7 @@ import { useV3AuctionContext } from '@/components/rooms/v3/V3AuctionStateProvide
 import { useV3Squad } from '@/hooks/useV3Squad';
 import { SquadMetrics } from '@/components/rooms/v3/SquadMetrics';
 import { SquadRoleSection } from '@/components/rooms/v3/SquadRoleSection';
+import { AuctionSelect } from '@/components/ui/auction-select';
 import {
   AuctionReportLayout,
   ReportFeedback,
@@ -64,12 +65,12 @@ export default function SquadManagementPage() {
           description="Your signings, your balance, your next move. Explore every franchise in the room."
         />
         {teams.length > 0 && (
-          <div className="min-w-0 rounded-2xl border border-[#2A312D] bg-[#141917] p-3">
+          <div className="min-w-0 rounded-xl border border-[#2A312D] bg-[#141917] p-3 sm:p-4">
             <label
               htmlFor="squad-franchise"
               className="mb-2 block px-1 text-[10px] font-semibold uppercase tracking-wider text-[#9CA6A0]"
             >
-              Select franchise
+              Franchise · {teams.findIndex(team => team.id === selectedTeam?.id) + 1} of {teams.length}
             </label>
             <div className="flex min-w-0 items-center gap-1">
               <button
@@ -81,18 +82,14 @@ export default function SquadManagementPage() {
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
-              <select
+              <AuctionSelect
                 id="squad-franchise"
+                label="Select franchise"
                 value={selectedTeam?.id || ''}
-                onChange={(event) => selectTeam(event.target.value)}
-                className="h-11 min-w-0 flex-1 rounded-lg border border-[#2A312D] bg-[#0B0F0D] px-2 text-sm font-semibold text-[#F3F4F1] focus:outline-none focus:ring-2 focus:ring-[#C9A227]"
-              >
-                {teams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
+                onValueChange={selectTeam}
+                options={teams.map(team => ({ value: team.id, label: team.name }))}
+                className="flex-1"
+              />
               <button
                 type="button"
                 onClick={() => stepTeam(1)}

@@ -3,6 +3,7 @@ import { test, expect, Page } from '@playwright/test';
 import crypto from 'crypto';
 import { loadEnvConfig } from '@next/env';
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import {
   createDisposableTestUser,
   setupDisposableAuction,
@@ -22,10 +23,18 @@ async function createSupabaseBrowserTestUser() {
 }
 
 async function loginSupabaseTestUser(page: Page, testUser: any) {
-  await page.goto('/sign-in');
-  await page.getByLabel('Email address', { exact: true }).fill(testUser.email);
-  await page.getByLabel('Password', { exact: true }).fill('Pass_' + testUser.runId + '!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  // Auction fixtures use an existing disposable native session, not the retired
+  // password UI. This is not a Google/GitHub provider end-to-end test.
+  const { data: { session } } = await testUser.supabase.auth.getSession();
+  if (!session) throw new Error('Disposable fixture has no native session.');
+  const cookieValues: { name: string; value: string }[] = [];
+  const client = createServerClient(process.env.SUPABASE_TEST_URL!, process.env.SUPABASE_TEST_ANON_KEY!, {
+    cookies: { getAll: () => [], setAll: values => { cookieValues.push(...values); } },
+  });
+  const { error } = await client.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+  if (error) throw new Error('Disposable native session verification failed.');
+  await page.context().addCookies(cookieValues.map(cookie => ({ ...cookie, url: 'http://localhost:3000', sameSite: 'Lax' as const })));
+  await page.goto('/dashboard');
   await page.waitForURL('**/dashboard*', { timeout: 30000 });
   const response = await page.request.get('/api/auth/me');
   const result = await response.json();

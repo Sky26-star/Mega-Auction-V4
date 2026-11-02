@@ -1,4 +1,4 @@
-// Limit auth callbacks to known application destinations, including recovery.
-export function safeAuthRedirect(next: string | null) {
-  return next === '/reset-password' ? next : '/auth/complete';
+// Social sign-in always validates the existing profile before entering the app.
+export function safeAuthRedirect(_next: string | null) {
+  return '/auth/complete';
 }

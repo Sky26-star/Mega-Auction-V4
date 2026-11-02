@@ -6,7 +6,7 @@ Multiplayer cricket auctions with Supabase Realtime, franchise squads, trades an
 
 - Next.js 15, React 18, TypeScript and Tailwind on Vercel Hobby.
 - Supabase PostgreSQL 17 with authenticated RPCs and row-level security.
-- Native Supabase email/password authentication; Auth UUIDs are profile IDs.
+- Native Supabase Google/GitHub authentication; Auth UUIDs are profile IDs.
 - Supabase Cron, pg_net and Vault drive persisted auction deadlines. Production HTTP ticks run only when work is due; no Fly account or separate paid worker is required.
 - Human rooms are enabled. Bot opponents remain deferred and disabled.
 
@@ -52,6 +52,6 @@ Exact steps, monitoring queries and rollback instructions are in [docs/DEPLOYMEN
 
 The server verifies native Auth identities. Administrative checks read the protected `is_admin` field through a server-only client. Browser callers cannot change identity or admin fields. Tick requests require a private shared secret. Local credential files, database backups and diagnostic routes are excluded from deployment artifacts.
 
-The user selected email/password launch with the existing email auto-confirm setting. Google login is not offered. Public password-reset mail requires a configured SMTP provider; Supabase's default sender is restricted. No hosted Auth settings were changed during code preparation.
+The active authentication UI offers Google and GitHub only. Provider credentials, callback URLs and backend provider settings still require the setup in [SOCIAL_AUTH_SETUP.md](docs/SOCIAL_AUTH_SETUP.md). Password login/signup/recovery controls are retired. Existing account continuity and Supabase-managed identity linking must be verified before launch.
 
 Zero-budget plans have usage limits and possible service pauses. Test public login, realtime reconnection, bids, settlement, trades and mini auctions after deployment before sharing the site. Do not enable a paid plan without explicit authorization.
