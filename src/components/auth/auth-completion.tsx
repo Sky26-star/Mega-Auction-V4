@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 type AuthMeResponse = {
@@ -48,7 +49,7 @@ export function AuthCompletion() {
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-950 px-6 text-center text-slate-100">
       <p role="status" aria-live="polite">{message}</p>
       {message !== 'Checking your auction profile…' && (
-        <a className="text-amber-300 underline" href="/sign-in">Return to sign in</a>
+        <Link className="text-amber-300 underline" href="/sign-in">Return to sign in</Link>
       )}
     </main>
   );

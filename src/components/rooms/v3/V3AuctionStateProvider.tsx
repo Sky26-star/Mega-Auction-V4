@@ -31,7 +31,9 @@ export function V3AuctionStateProvider({ roomId, children }: { roomId: string; c
 
   useEffect(() => {
     async function loadUserAndRoom() {
-      if (!roomId) return;
+      // Host-only bot work is disabled in human-only rooms; avoid an unused
+      // profile API call and room query on every room-layout mount.
+      if (!AUCTION_BOTS_ENABLED || !roomId) return;
       try {
         const profile = await getCurrentProfile();
         if (profile) {

@@ -8,6 +8,10 @@ const __dirname = path.dirname(__filename);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   outputFileTracingRoot: __dirname,
+  onDemandEntries: {
+    maxInactiveAge: 5 * 60 * 1000,
+    pagesBufferLength: 4,
+  },
   async headers() {
     return [
       {

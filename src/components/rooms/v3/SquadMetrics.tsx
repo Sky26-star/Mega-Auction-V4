@@ -1,49 +1,33 @@
-import React from 'react';
-import { V3Team } from '@/lib/v3-auction-types';
+import type { V3Team } from '@/lib/v3-auction-types';
+import { MoneyAmount, ReportMetric } from './auction-report-ui';
 
-interface SquadMetricsProps {
-  team: V3Team;
-}
-
-export function SquadMetrics({ team }: SquadMetricsProps) {
-  const capitalDeployed = team.initial_purse - team.purse;
-
+export function SquadMetrics({ team }: { team: V3Team }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <MetricCard
-        label="WAR CHEST"
-        value={`₹${team.purse.toFixed(2)}`}
-        subtext="Cr"
-        highlight
-      />
-      <MetricCard
-        label="CAPITAL DEPLOYED"
-        value={`₹${capitalDeployed.toFixed(2)}`}
-        subtext="Cr"
-      />
-      <MetricCard
-        label="ROSTER"
-        value={team.players_bought.toString()}
-        subtext="/ 25"
-      />
-      <MetricCard
-        label="OVERSEAS SLOTS"
-        value={team.overseas_count.toString()}
-        subtext="/ 8"
-      />
-    </div>
-  );
-}
-
-function MetricCard({ label, value, subtext, highlight = false }: { label: string, value: string, subtext: string, highlight?: boolean }) {
-  return (
-    <div className={`p-5 rounded-2xl border ${highlight ? 'border-[#C9A227]/40 bg-[#181E1A]' : 'border-[#2A312D] bg-[#141917]'}`}>
-      <p className="text-[10px] sm:text-xs font-mono font-bold text-[#9CA6A0] uppercase tracking-widest mb-2">
-        {label}
-      </p>
-      <p className={`text-2xl sm:text-3xl font-mono-numbers font-black tracking-tight ${highlight ? 'text-[#C9A227]' : 'text-[#F3F4F1]'}`}>
-        {value} <span className="text-sm sm:text-base font-bold text-[#9CA6A0]">{subtext}</span>
-      </p>
-    </div>
+    <section aria-label="Franchise overview" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <ReportMetric label="Available purse" detail="Ready for your next signing" highlight>
+        <MoneyAmount lakhs={team.purse} />
+      </ReportMetric>
+      <ReportMetric label="Total spent" detail="Invested in this squad">
+        <MoneyAmount lakhs={team.initial_purse - team.purse} />
+      </ReportMetric>
+      <ReportMetric
+        label="Squad size"
+        detail={`${Math.max(0, 25 - team.players_bought)} places remaining`}
+      >
+        <span className="font-mono-numbers">
+          {team.players_bought}
+          <span className="ml-2 text-sm font-normal text-[#9CA6A0]">/ 25</span>
+        </span>
+      </ReportMetric>
+      <ReportMetric
+        label="Overseas players"
+        detail={`${Math.max(0, 8 - team.overseas_count)} overseas places remaining`}
+      >
+        <span className="font-mono-numbers">
+          {team.overseas_count}
+          <span className="ml-2 text-sm font-normal text-[#9CA6A0]">/ 8</span>
+        </span>
+      </ReportMetric>
+    </section>
   );
 }

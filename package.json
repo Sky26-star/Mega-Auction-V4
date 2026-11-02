@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/check-port.js && node scripts/start-dev.js",
+    "dev": "node scripts/check-port.js && node scripts/check-local-services.js && node scripts/start-dev.js",
     "worker": "tsx scripts/worker.ts",
     "build": "next build",
     "start": "next start",

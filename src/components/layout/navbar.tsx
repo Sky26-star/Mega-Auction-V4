@@ -35,12 +35,12 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
               <div className="w-8 h-8 rounded-lg bg-[#E4B93F] flex items-center justify-center shadow-[0_0_15px_rgba(228,185,63,0.3)] group-hover:shadow-[0_0_20px_rgba(228,185,63,0.5)] transition-all">
                 <Gavel className="w-5 h-5 text-[#0B0F0D]" />
               </div>
-              <span className={`${auctionRoom ? 'hidden xl:inline' : ''} text-lg font-black uppercase tracking-widest text-[#F3F4F1] drop-shadow-md transition-colors group-hover:text-[#E4B93F]`}>
+              <span className={`${auctionRoom ? 'hidden whitespace-nowrap xl:inline' : ''} text-lg font-black uppercase tracking-widest text-[#F3F4F1] drop-shadow-md transition-colors group-hover:text-[#E4B93F]`}>
                 Mega <span className="text-[#C9A227]">Auction</span>
               </span>
             </Link>
 
-            {roomId && isSignedIn && (
+            {roomId && isSignedIn && !auctionRoom && (
               <div className={`${auctionRoom ? 'hidden xl:flex' : 'hidden md:flex'} items-center space-x-1.5 rounded-lg border border-[#2A312D] bg-[#181E1A] px-3 py-1.5`}>
                 <Users className="w-3.5 h-3.5 text-[#E4B93F]" />
                 <span className="text-[10px] font-bold text-[#E4B93F] uppercase tracking-widest">

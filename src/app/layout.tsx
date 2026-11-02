@@ -5,8 +5,8 @@ import ClerkSupabaseTokenBridge from '@/components/providers/clerk-supabase-toke
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI Based Career Guidance and Job Finder Website',
-  description: 'AI based career guidance and job finder website',
+  title: 'Mega Auction Arena',
+  description: 'Live cricket auctions, franchise squads, and auction insights.',
 };
 
 export default function RootLayout({

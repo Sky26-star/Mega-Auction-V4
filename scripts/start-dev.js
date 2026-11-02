@@ -173,12 +173,10 @@ async function runDevRunner(options = {}) {
   const spawnImpl = options.spawnImpl || spawn;
   const processRef = options.processRef || process;
   const log = options.log || console;
-  const isWindows = platform === 'win32';
-  const npxCmd = isWindows ? 'npx.cmd' : 'npx';
-  const npmCmd = isWindows ? 'npm.cmd' : 'npm';
-  const nextProcess = spawnImpl(npxCmd, ['next', 'dev', '-p', '3000'], {
+  const nodeExecutable = options.execPath || process.execPath;
+  const nextProcess = spawnImpl(nodeExecutable, [require.resolve('next/dist/bin/next'), 'dev', '--disable-source-maps', '-p', '3000'], {
     stdio: 'inherit',
-    shell: isWindows,
+    windowsHide: true,
   });
   const nextOutcome = childOutcome(nextProcess);
   let tickerProcess;
@@ -218,9 +216,9 @@ async function runDevRunner(options = {}) {
     }
 
     log.log('[DEV-RUNNER] Next.js tick route is ready; starting the serialized auction worker.');
-    tickerProcess = spawnImpl(npmCmd, ['run', 'worker'], {
+    tickerProcess = spawnImpl(nodeExecutable, [require.resolve('tsx/cli'), 'scripts/worker.ts'], {
       stdio: 'inherit',
-      shell: isWindows,
+      windowsHide: true,
     });
     tickerOutcome = childOutcome(tickerProcess);
 

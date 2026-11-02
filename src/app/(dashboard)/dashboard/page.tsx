@@ -40,19 +40,21 @@ export default async function DashboardPage() {
   // ------------------------------------------------------------
   // Current Clerk user
   // ------------------------------------------------------------
-  const clerkUser = await currentUser();
-
   // ------------------------------------------------------------
   // Supabase is used for application data only.
   // ------------------------------------------------------------
-  const supabase = await createClient();
+  const [clerkUser, supabase, profile, adminResult] = await Promise.all([
+    currentUser(),
+    createClient(),
+    getCurrentMappedProfile(),
+    verifyAdminUser(),
+  ]);
 
   // ------------------------------------------------------------
   // Fetch User Profile
   // ------------------------------------------------------------
-  const profile = await getCurrentMappedProfile();
   if (!profile) redirect('/auth/complete');
-  const { authorized: isAdmin } = await verifyAdminUser();
+  const { authorized: isAdmin } = adminResult;
 
   // ------------------------------------------------------------
   // Fetch User's Recent Rooms

@@ -84,9 +84,15 @@ describe('development worker startup and shutdown', () => {
 
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
     expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(spawnImpl).toHaveBeenNthCalledWith(1, process.execPath,
+      [expect.stringContaining('next'), 'dev', '--disable-source-maps', '-p', '3000'],
+      { stdio: 'inherit', windowsHide: true });
 
     releaseProbe(new Response(null, { status: 405 }));
     await vi.waitFor(() => expect(spawnImpl).toHaveBeenCalledTimes(2));
+    expect(spawnImpl).toHaveBeenNthCalledWith(2, process.execPath,
+      [expect.stringContaining('tsx'), 'scripts/worker.ts'],
+      { stdio: 'inherit', windowsHide: true });
     worker.exitCode = 1;
     worker.emit('exit', 1, null);
 

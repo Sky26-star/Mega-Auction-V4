@@ -367,6 +367,29 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
   // useV3Stats Tests
   // =========================================================================
   describe('useV3Stats', () => {
+    it('starts teams and bids reads while the lots request is still pending', async () => {
+      let resolveLots!: (value: { data: never[]; error: null }) => void;
+      const pendingLots = new Promise(resolve => { resolveLots = resolve; });
+      mockSupabase.from.mockImplementation((table: string) => ({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue(table === 'auction_lots'
+            ? { in: vi.fn().mockReturnValue(pendingLots) }
+            : table === 'bids'
+              ? { eq: vi.fn().mockReturnValue({ order: vi.fn().mockResolvedValue({ data: [], error: null }) }) }
+              : Promise.resolve({ data: [], error: null })),
+        }),
+      }));
+      const { result } = renderHook(() => useV3Stats('parallel-auction'));
+      await waitFor(() => {
+        expect(mockSupabase.from).toHaveBeenCalledWith('teams');
+        expect(mockSupabase.from).toHaveBeenCalledWith('bids');
+      });
+      expect(result.current.loading).toBe(true);
+      await act(async () => resolveLots({ data: [], error: null }));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.stats?.auctionId).toBe('parallel-auction');
+    });
+
     it('Null auction ID: loading settles immediately to false, stats is null without querying', async () => {
       const { result } = renderHook(() => useV3Stats(null));
 
@@ -519,12 +542,14 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
     });
 
     it('Fetch errors: query failure sets error message and settles loading', async () => {
-      mockSupabase.from.mockImplementation(() => ({
+      mockSupabase.from.mockImplementation((table: string) => ({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
+            data: [], error: null,
+            eq: vi.fn().mockReturnValue({ order: vi.fn().mockResolvedValue({ data: [], error: null }) }),
             in: vi.fn().mockResolvedValue({
               data: null,
-              error: new Error('Failed to query lots table'),
+              error: table === 'auction_lots' ? new Error('Failed to query lots table') : null,
             }),
           }),
         }),

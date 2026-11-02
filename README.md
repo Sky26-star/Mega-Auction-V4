@@ -34,12 +34,26 @@ cp .env.example .env.local
 
 ### Running Locally
 ```bash
-# Start Next.js development server
+# Start Next.js and its background auction worker together
 npm run dev
-
-# Start background auction worker locally
-npm run worker
 ```
+
+For a local Supabase URL, start Docker Desktop and the verified Supabase stack first.
+`npm run dev` checks the local Auth health endpoint before starting Next.js, then waits
+for the auction tick route before launching one worker. An unavailable local API
+produces a startup error instead of repeated worker timeouts. This health check
+confirms API availability; container identity, database volumes, and local-only port
+bindings must be verified separately when setting up or repairing a stack.
+
+`npm run worker` is for running the worker separately when the web server is already
+running without a worker. Do not run it alongside `npm run dev`.
+
+Development keeps up to four recently compiled pages available for five minutes.
+The launcher starts the installed Next.js and worker programs directly, avoiding
+extra Windows command-shell processes. Node source-map translation is disabled
+for the development server; browser source maps and hot reload remain available.
+First visits can still require compilation. Warm navigation and first-time
+compilation are different measurements; neither is a guaranteed timing budget.
 
 ### Verification Scripts
 ```bash
