@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   caller: { rpc: vi.fn() },
 }));
 
-vi.mock('@clerk/nextjs/server', () => ({ auth: mocks.auth }));
+vi.mock('@/lib/auth/server-session', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.admin }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => mocks.caller }));
 

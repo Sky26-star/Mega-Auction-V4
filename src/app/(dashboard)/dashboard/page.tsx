@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@/lib/auth/server-session';
 import { createClient } from '@/lib/supabase/server';
 import { Navbar } from '@/components/layout/navbar';
 import { getCurrentMappedProfile } from '@/lib/auth/server-profile';
@@ -28,22 +28,22 @@ export const metadata = {
 
 export default async function DashboardPage() {
   // ------------------------------------------------------------
-  // Clerk is the authoritative authentication provider.
+  // Supabase Auth is the authoritative authentication provider.
   // ------------------------------------------------------------
   const { userId } = await auth();
 
-  // No authenticated Clerk session → login.
+  // No authenticated Supabase Auth session → login.
   if (!userId) {
     redirect('/sign-in');
   }
 
   // ------------------------------------------------------------
-  // Current Clerk user
+  // Current Supabase Auth user
   // ------------------------------------------------------------
   // ------------------------------------------------------------
   // Supabase is used for application data only.
   // ------------------------------------------------------------
-  const [clerkUser, supabase, profile, adminResult] = await Promise.all([
+  const [nativeUser, supabase, profile, adminResult] = await Promise.all([
     currentUser(),
     createClient(),
     getCurrentMappedProfile(),
@@ -129,12 +129,12 @@ export default async function DashboardPage() {
   const displayName =
     profile?.display_name ||
     profile?.username ||
-    clerkUser?.firstName ||
-    clerkUser?.username ||
+    nativeUser?.user_metadata?.display_name ||
+    nativeUser?.user_metadata?.full_name ||
     'Franchise Owner';
 
   const email =
-    clerkUser?.primaryEmailAddress?.emailAddress ||
+    nativeUser?.email ||
     'N/A';
 
   return (

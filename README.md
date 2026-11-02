@@ -1,149 +1,57 @@
 # Mega Auction V4
 
-Authoritative, real-time multiplayer cricket auction draft platform with sub-second bid resolution, server-side bot intelligence, and zero split-brain lot state under concurrent bidding.
+Multiplayer cricket auctions with Supabase Realtime, franchise squads, trades and mini auctions.
 
----
+## Architecture
 
-## 1. Core Architecture
+- Next.js 15, React 18, TypeScript and Tailwind on Vercel Hobby.
+- Supabase PostgreSQL 17 with authenticated RPCs and row-level security.
+- Native Supabase email/password authentication; Auth UUIDs are profile IDs.
+- Supabase Cron, pg_net and Vault drive persisted auction deadlines. Production HTTP ticks run only when work is due; no Fly account or separate paid worker is required.
+- Human rooms are enabled. Bot opponents remain deferred and disabled.
 
-- **Web Application:** Next.js 15 (React 18, Tailwind CSS, TypeScript).
-- **Authoritative Database:** PostgreSQL 17 via Supabase Cloud with Row Level Security (RLS) and SECURITY DEFINER RPCs (`v3_place_bid`, `v3_finalize_and_advance_lot`, `v3_start_bidding`).
-- **Realtime Layer:** Supabase Realtime WebSockets for sub-200ms bid and lot transitions.
-- **Authentication:** Clerk Auth with server-side identity bridge (`public.resolve_user_id()`) mapping Clerk identities to internal profile records.
-- **Autonomous Worker:** Background ticker process running singleton at 500ms cadence via Fly.io / Docker.
+See [the deployment guide](docs/DEPLOYMENT.md) for the complete zero-budget launch procedure, Auth choices, scheduler installation, verification and free-plan limits. The code preparation does not itself activate hosted services.
 
----
+## Local development
 
-## 2. Quick Start & Local Development
+Use Node 24 and npm. Install with `npm ci`, copy `.env.example` to `.env.local`, and fill in your local Supabase URL and keys. Set the local application URL to `http://localhost:3000`.
 
-### Prerequisites
-- Node.js >= 20.x
-- npm >= 10.x
-- PostgreSQL 17 or Supabase CLI (optional for direct database integration testing)
+Start Docker Desktop and the verified local Supabase stack, then run `npm run dev`. The launcher checks local Auth availability, starts Next.js and waits for the authenticated tick route before starting one local worker. Do not run another worker alongside it. Keep local worker settings pointed at a disposable local project.
 
-### Installation
-```bash
-npm ci
+First visits in development can require compilation. Production builds compile pages before serving; cold function/network delays and warm navigation are separate measurements.
+
+## Checks
+
+```sh
+npm run typecheck
+npm run lint
+npm run test:run -- --maxWorkers=2
+npm run check:production
+npm run build
 ```
 
-### Environment Setup
-Copy `.env.example` to `.env.local` and configure your credentials:
-```bash
-cp .env.example .env.local
-```
+`npm run build` requires hosted production environment values and verifies that `/api/diag` is absent. Do not weaken the production check to build against localhost. CI uses nonworking placeholder hosted credentials for compilation and a separate disposable PostgreSQL service for database checks.
 
-### Running Locally
-```bash
-# Start Next.js and its background auction worker together
-npm run dev
-```
+## Database and timer setup
 
-For a local Supabase URL, start Docker Desktop and the verified Supabase stack first.
-`npm run dev` checks the local Auth health endpoint before starting Next.js, then waits
-for the auction tick route before launching one worker. An unavailable local API
-produces a startup error instead of repeated worker timeouts. This health check
-confirms API availability; container identity, database volumes, and local-only port
-bindings must be verified separately when setting up or repairing a stack.
+Canonical schema migrations live in `supabase/migrations/`. Compare the target migration ledger, inspect a dry run and apply reviewed pending migrations. Do not replay every historical migration against a populated production project.
 
-`npm run worker` is for running the worker separately when the web server is already
-running without a worker. Do not run it alongside `npm run dev`.
+The native profile trigger migration creates unprivileged profiles by Auth UUID, handles duplicate usernames, preserves historical profiles and never merges accounts by email. Existing Clerk-only identities require separate review if their old room ownership must be transferred.
 
-Development keeps up to four recently compiled pages available for five minutes.
-The launcher starts the installed Next.js and worker programs directly, avoiding
-extra Windows command-shell processes. Node source-map translation is disabled
-for the development server; browser source maps and hot reload remain available.
-First visits can still require compilation. Warm navigation and first-time
-compilation are different measurements; neither is a guaranteed timing budget.
+Hosted scheduler installation is separate from schema migration:
 
-### Verification Scripts
-```bash
-npm run typecheck                  # Verify TypeScript types (0 errors)
-npm run lint                       # Run ESLint audit
-npm run test:run                   # Run Vitest test suite with threads pool
-npm run check:no-diagnostic-route  # Verify diagnostic routes are absent
-```
+1. Enable Supabase Cron, pg_net and Vault.
+2. Install `supabase/operations/auction-scheduler.sql` (disabled initially).
+3. Deploy and verify the protected tick endpoint.
+4. Store the stable tick URL and matching secret in Vault.
+5. Install `supabase/operations/schedule-auction-tick.sql`, enable the scheduler and verify a two-device auction.
 
----
+Exact steps, monitoring queries and rollback instructions are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-## 3. Database Migrations & Replay
+## Security and launch limits
 
-All database schema definitions and RPCs are version-controlled in `supabase/migrations/`.
+The server verifies native Auth identities. Administrative checks read the protected `is_admin` field through a server-only client. Browser callers cannot change identity or admin fields. Tick requests require a private shared secret. Local credential files, database backups and diagnostic routes are excluded from deployment artifacts.
 
-### Migration Ordering & Application
-```bash
-# Apply pending migrations to local or target PostgreSQL
-for file in $(ls -1v supabase/migrations/*.sql); do
-  echo "Applying $file..."
-  psql "$DATABASE_URL" -f "$file"
-done
+The user selected email/password launch with the existing email auto-confirm setting. Google login is not offered. Public password-reset mail requires a configured SMTP provider; Supabase's default sender is restricted. No hosted Auth settings were changed during code preparation.
 
-# Reload PostgREST schema cache
-psql "$DATABASE_URL" -c "NOTIFY pgrst, 'reload schema';"
-```
-
----
-
-## 4. Background Worker Deployment & Startup
-
-The auction worker executes autonomous lot transitions, countdown timer expiration, and bot bid submissions.
-
-### Deployment on Fly.io
-Configuration is defined in `fly.toml`:
-```bash
-# 1. Provision required secrets in Fly vault
-fly secrets set AUCTION_TICK_URL="https://your-domain.com/api/auction/tick" -a mega-auction-worker
-fly secrets set AUCTION_TICK_SECRET="your_cryptographic_secret_min_32_chars" -a mega-auction-worker
-
-# 2. Deploy worker container
-fly deploy -a mega-auction-worker
-
-# 3. Enforce singleton machine count
-fly scale count 1 -a mega-auction-worker --yes
-```
-
----
-
-## 5. Backup, Restore, and Disaster Recovery
-
-### Database Volume Snapshot & Export
-```bash
-# Capture full schema and data dump
-pg_dump "$DATABASE_URL" --format=custom --file="backup_$(date +%Y%m%d_%H%M%S).dump"
-```
-
-### Database Restore Procedure
-```bash
-pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" "backup_file.dump"
-psql "$DATABASE_URL" -c "NOTIFY pgrst, 'reload schema';"
-```
-
----
-
-## 6. Production Rollback Plan
-
-If an operational anomaly occurs during deployment:
-
-1. **Scale down worker:**
-   ```bash
-   fly scale count 0 -a mega-auction-worker --yes
-   ```
-2. **Rollback web deployment:**
-   Promote previous stable deployment in Vercel Dashboard or CLI (`vercel rollback`).
-3. **Database rollback:**
-   Apply pre-tested reverse scripts from `supabase/local-db-rollback/` or restore from volume snapshot.
-4. **Restore worker:**
-   ```bash
-   fly scale count 1 -a mega-auction-worker --yes
-   ```
-
-For detailed incident response, stuck auction recovery, and telemetry metrics, refer to:
-👉 [RELEASE_OPERATIONS_AND_INCIDENT_RUNBOOK.md](docs/RELEASE_OPERATIONS_AND_INCIDENT_RUNBOOK.md).
-
----
-
-## 7. Admin and Test-Mode Security Controls
-
-- **Admin Access:** Server-side verification (`verifyAdminUser` in `src/lib/admin/auth.ts`) validates `profiles.is_admin = true` through the server service client. Client flags are never trusted.
-- **Diagnostic Route Gating:** `/api/diag` is strictly disabled (`route.ts.disabled`) and blocked from production builds.
-- **Tick Route Security:** `/api/auction/tick` requires `x-auction-tick-secret` >= 32 characters compared with `timingSafeEqual`.
-- **Environment Isolation:** Local Supabase URLs (`127.0.0.1`, `localhost`) are blocked in production via `src/lib/env.ts`.
+Zero-budget plans have usage limits and possible service pauses. Test public login, realtime reconnection, bids, settlement, trades and mini auctions after deployment before sharing the site. Do not enable a paid plan without explicit authorization.

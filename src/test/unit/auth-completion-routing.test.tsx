@@ -8,7 +8,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace, refresh }),
 }));
 
-describe('Clerk post-auth profile routing', () => {
+describe('Supabase Auth post-auth profile routing', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     replace.mockReset();

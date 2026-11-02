@@ -65,7 +65,7 @@ export default function SignupPage() {
 
           {/* RIGHT SIGNUP PANEL (~40% Desktop Col 5) */}
           <div className="lg:col-span-5 flex justify-center lg:justify-end w-full order-3 lg:order-2 py-2">
-            <AuthForm />
+            <AuthForm initialMode="signup" />
           </div>
 
         </div>

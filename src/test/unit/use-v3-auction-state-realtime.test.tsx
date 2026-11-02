@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import * as clientModule from '@/lib/supabase/client';
 import { useV3AuctionState } from '@/hooks/useV3AuctionState';
 
-vi.mock('@clerk/nextjs', () => ({ useAuth: vi.fn() }));
+vi.mock('@/components/providers/auth-provider', () => ({ useAuth: vi.fn() }));
 
 const auction = {
   id: 'auction-1',

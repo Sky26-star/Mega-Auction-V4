@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/server-session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { evaluateBotTradeResponse, generateBotTradeProposals } from '@/lib/trade/bot-trade-evaluator';
@@ -37,9 +37,7 @@ export async function POST(request: Request) {
       .from('rooms').select('id, host_id, settings').eq('id', auction.room_id).maybeSingle();
     if (roomError || !room) return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
 
-    const { data: mapping } = await admin.from('clerk_user_mappings')
-      .select('profile_id').eq('clerk_user_id', userId).maybeSingle();
-    if (room.host_id !== userId && room.host_id !== mapping?.profile_id) {
+    if (room.host_id !== userId) {
       return NextResponse.json({ success: false, error: 'Only the room host can run bot trading' }, { status: 403 });
     }
 

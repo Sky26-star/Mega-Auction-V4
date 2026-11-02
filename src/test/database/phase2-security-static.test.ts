@@ -3,8 +3,6 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { formatIsolatedTarget, resolveIsolatedRlsConfig } from './runtime-test-config';
 
-const readDraft = (name: string) =>
-  readFileSync(resolve(process.cwd(), 'docs', name), 'utf8');
 const readRoomProfileMigration = () =>
   readFileSync(
     resolve(process.cwd(), 'supabase/migrations/20261017100000_room_scoped_profile_access.sql'),
@@ -133,35 +131,30 @@ describe('Phase 2 security migration drafts', () => {
     const dashboard = readFileSync(resolve(process.cwd(), 'src/app/(dashboard)/dashboard/page.tsx'), 'utf8');
     const profileRoute = readFileSync(resolve(process.cwd(), 'src/app/api/auth/me/route.ts'), 'utf8');
     expect(adminAuth).toContain("from '@/lib/supabase/admin'");
-    expect(adminAuth).toContain(".from('clerk_user_mappings')");
+    expect(adminAuth).toContain("from '@/lib/auth/server-session'");
+    expect(adminAuth).toContain(".eq('id', userId)");
+    expect(adminAuth).not.toContain(".from('clerk_user_mappings')");
     expect(adminAuth).toContain(".select('id, username, display_name, avatar_url, is_admin, created_at, updated_at')");
     expect(dashboard).toContain('verifyAdminUser()');
     expect(profileRoute).toContain("const PROFILE_FIELDS = 'id, username, display_name, avatar_url, created_at, updated_at'");
     expect(profileRoute).not.toMatch(/\.select\('\*'\)/);
   });
 
-  it('keeps Phase 2C syntax, mapped authorization, and grants aligned', () => {
-    const sql = readDraft('PHASE_2C_REMOTE_MIGRATION.sql');
+  it('checks deployed canonical state authorization and grants without local draft files', () => {
+    const sql = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261026210000_harden_auction_rpc_grants_and_auth.sql'), 'utf8');
     const stateFunction = sql.match(
-      /CREATE OR REPLACE FUNCTION public\.get_authoritative_auction_state[\s\S]*?REVOKE ALL/
+      /CREATE OR REPLACE FUNCTION public\.get_authoritative_auction_state[\s\S]*?\$function\$;/
     )?.[0];
-    const initializeFunction = sql.match(
-      /CREATE OR REPLACE FUNCTION public\.initialize_and_start_auction[\s\S]*?REVOKE ALL/
-    )?.[0];
-
-    expect(stateFunction).toContain('v_min_required_bid INT');
     expect(stateFunction).toContain('public.resolve_user_id()');
-    expect(stateFunction).toMatch(/SET current_lot_id = v_active_lot\.id\s+WHERE id = v_auction\.id\s+AND current_lot_index = v_auction\.current_lot_index\s+AND current_lot_id IS DISTINCT FROM v_active_lot\.id/);
-    expect(sql).not.toContain('auth.uid()');
-    expect(stateFunction).toContain('public.is_room_participant');
+    expect(stateFunction).toContain('ERR_UNAUTHORIZED');
+    expect(stateFunction).toContain('ERR_ROOM_MEMBERSHIP_REQUIRED');
+    expect(stateFunction).toContain('r.host_id = v_user_id OR rp.user_id = v_user_id');
+    expect(stateFunction).toContain('al.lot_index = v_auction.current_lot_index');
+    expect(stateFunction).toContain("v_request_role NOT IN ('authenticated', 'anon')");
     expect(sql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.(?:get_authoritative_auction_state|initialize_and_start_auction)[^;]*\banon\b/i);
-    expect(initializeFunction).toContain("auth.role() IS DISTINCT FROM 'service_role'");
-    expect(initializeFunction).toContain("v_auction.status NOT IN ('LOBBY', 'READY')");
-    expect(sql).toMatch(/END LOOP;\s+END IF;\s+END IF;\s+IF v_lot_index = 0 AND v_existing_lots = 0/);
-    expect(initializeFunction).toContain("'PLAYER_SET_REQUIRED'");
-    expect(initializeFunction).toContain("'PLAYER_SET_HAS_NO_PLAYERS'");
-    expect(initializeFunction).toMatch(/FROM public\.players p\s+WHERE p\.player_set_id = v_target_set_id/);
-    expect(initializeFunction).not.toMatch(/FROM public\.players p\s+ORDER BY[\s\S]*?LIMIT 50/);
+    expect(sql).toContain('REVOKE ALL ON FUNCTION public.initialize_and_start_auction(uuid, uuid) FROM PUBLIC, anon');
+    expect(sql).toContain('REVOKE ALL ON FUNCTION public.initialize_and_start_auction(uuid, uuid) FROM service_role');
+    expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.initialize_and_start_auction(uuid, uuid) TO authenticated');
   });
 });
 

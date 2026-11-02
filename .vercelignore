@@ -21,4 +21,9 @@ coverage/
 
 # Local repository metadata and stray generated file.
 .git/
+scratch/
+src/test/
+docs/
+supabase/
+node_modules/
 {{.Destination}}

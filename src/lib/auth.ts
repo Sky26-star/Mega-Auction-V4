@@ -72,7 +72,7 @@ export async function requestPasswordReset(data: ForgotPasswordInput) {
   const cleanEmail = data.email.trim().toLowerCase();
 
   const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-    redirectTo: `${origin}/reset-password`,
+    redirectTo: `${origin}/auth/callback?next=/reset-password`,
   });
 
   if (error) {
@@ -107,14 +107,14 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     const json = await res.json();
     return json.profile || null;
   } catch (error) {
-    console.error('Failed to fetch current profile via Clerk/Supabase bridge:', error);
+    console.error('Failed to fetch current profile via Supabase Auth/Supabase bridge:', error);
     return null;
   }
 }
 
 /**
  * Update current user's profile display_name and avatar_url.
- * The API maps Clerk identity to the internal profile id and performs the
+ * The API maps Supabase Auth identity to the internal profile id and performs the
  * update through the caller's authenticated Supabase client/RLS. Never updates
  * is_admin or username.
  */

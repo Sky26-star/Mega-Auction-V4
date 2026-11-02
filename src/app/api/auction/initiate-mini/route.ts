@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/server-session';
 import { createClient } from '@/lib/supabase/server';
 import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
 

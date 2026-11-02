@@ -1,8 +1,6 @@
 import './setup/e2e-target-guard';
 import { test, expect, Page } from '@playwright/test';
 import crypto from 'crypto';
-import { clerkClient } from '@clerk/nextjs/server';
-import { clerk as clerkTesting, clerkSetup } from '@clerk/testing/playwright';
 import { loadEnvConfig } from '@next/env';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -12,150 +10,48 @@ import {
 } from './setup/auction-fixture';
 
 loadEnvConfig(process.cwd());
-if (!process.env.CLERK_PUBLISHABLE_KEY && process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-  process.env.CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-}
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_TEST_URL!,
   process.env.SUPABASE_TEST_SERVICE_ROLE_KEY!
 );
 
-async function createClerkDisposableTestUser() {
-  if (
-    !process.env.CLERK_SECRET_KEY?.startsWith('sk_test_') ||
-    !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith('pk_test_')
-  ) {
-    throw new Error('Browser lifecycle tests require Clerk development test keys.');
-  }
-
-  const runId = crypto.randomUUID();
-  const email = `e2e_${runId.replace(/-/g, '').slice(0, 12)}+clerk_test@example.com`;
-  const username = `e2e_${runId.replace(/-/g, '').slice(0, 12)}`;
-  const clerk = await clerkClient();
-  const clerkUser = await clerk.users.createUser({
-    emailAddress: [email],
-    emailAddressIdentificationStatus: ['verified'],
-    password: `Pass_${runId}!`,
-    username,
-    firstName: 'E2E',
-    lastName: 'Test',
-  });
-
-  return {
-    runId,
-    email,
-    clerkUserId: clerkUser.id,
-    user: null as any,
-    supabase: null as any,
-    profileId: null as string | null,
-  };
+async function createSupabaseBrowserTestUser() {
+  const result = await createDisposableTestUser();
+  return { ...result, email: result.user.email!, profileId: result.user.id };
 }
 
-async function loginClerkTestUser(page: Page, testUser: any) {
-  await clerkSetup();
-  await page.goto('/');
-  await clerkTesting.signIn({ page, emailAddress: testUser.email });
-  const signInBrowserState = await page.evaluate(() => {
-    const clerk = (window as any).Clerk;
-    return { loaded: clerk?.loaded ?? false, userId: clerk?.user?.id ?? null, sessionId: clerk?.session?.id ?? null };
-  });
-  if (!signInBrowserState.loaded || !signInBrowserState.userId || !signInBrowserState.sessionId || signInBrowserState.userId !== testUser.clerkUserId) {
-    throw new Error('Clerk helper did not create a session for the expected disposable test user.');
-  }
-
-  const profileResponse = await page.request.get('/api/auth/me', { timeout: 30000 });
-  const payload = await profileResponse.json().catch(() => null);
-  const profileId = payload?.profile?.id;
-  if (!profileResponse.ok() || !profileId) {
-    throw new Error(`Clerk test identity provisioning failed with HTTP ${profileResponse.status()}, body ${JSON.stringify(payload)}.`);
-  }
-  const { data: mapping, error: mappingError } = await supabaseAdmin
-    .from('clerk_user_mappings')
-    .select('clerk_user_id')
-    .eq('profile_id', profileId)
-    .single();
-  if (mappingError || !mapping?.clerk_user_id) {
-    throw new Error(`Clerk identity mapping was not provisioned: ${mappingError?.message || 'missing mapping'}.`);
-  }
-
-  const password = `Pass_${testUser.runId}!`;
-  const { error: passwordError } = await supabaseAdmin.auth.admin.updateUserById(profileId, {
-    password,
-    email_confirm: true,
-  });
-  if (passwordError) throw new Error(`Failed to prepare the local shadow identity: ${passwordError.message}.`);
-
-  const userClient = createClient(
-    process.env.SUPABASE_TEST_URL!,
-    process.env.SUPABASE_TEST_ANON_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  );
-  const { data: authData, error: authError } = await userClient.auth.signInWithPassword({
-    email: testUser.email,
-    password,
-  });
-  if (authError || !authData.user || !authData.session) {
-    throw new Error(`Failed to authenticate the local shadow identity: ${authError?.message || 'missing session'}.`);
-  }
-
-  testUser.profileId = profileId;
-  testUser.clerkUserId = mapping.clerk_user_id;
-  testUser.user = authData.user;
-  testUser.supabase = userClient;
+async function loginSupabaseTestUser(page: Page, testUser: any) {
+  await page.goto('/sign-in');
+  await page.getByLabel('Email address', { exact: true }).fill(testUser.email);
+  await page.getByLabel('Password', { exact: true }).fill('Pass_' + testUser.runId + '!');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.waitForURL('**/dashboard*', { timeout: 30000 });
+  const response = await page.request.get('/api/auth/me');
+  const result = await response.json();
+  if (!response.ok() || result.profile?.id !== testUser.user.id) throw new Error('Native browser identity verification failed.');
   return testUser;
 }
 
-async function cleanupClerkDisposableTestUser(testUser: any) {
-  let remoteFailure: unknown;
-  try {
-    const clerk = await clerkClient();
-    const result = await clerk.users.getUserList({ emailAddress: [testUser.email], limit: 10 });
-    const matches = result.data.filter((user) =>
-      user.emailAddresses.some((email) => email.emailAddress.toLowerCase() === testUser.email.toLowerCase())
-    );
-    for (const user of matches) await clerk.users.deleteUser(user.id);
-  } catch (error) {
-    remoteFailure = error;
-  }
-
-  let localFailure: unknown;
-  try {
-    let profileId = testUser.profileId as string | null;
-    if (!profileId) {
-      const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-      profileId = data.users.find((user) => user.email?.toLowerCase() === testUser.email.toLowerCase())?.id || null;
-    }
-    if (profileId) {
-      const { error: mappingError } = await supabaseAdmin
-        .from('clerk_user_mappings')
-        .delete()
-        .eq('profile_id', profileId);
-      if (mappingError) throw mappingError;
-      const { error: userError } = await supabaseAdmin.auth.admin.deleteUser(profileId);
-      if (userError && !userError.message.toLowerCase().includes('not found')) throw userError;
-    }
-  } catch (error) {
-    localFailure = error;
-  }
-
-  if (remoteFailure || localFailure) {
-    const details = [remoteFailure, localFailure]
-      .filter(Boolean)
-      .map((error) => error instanceof Error ? error.message : String(error));
-    throw new Error(`Failed to fully clean up a disposable Clerk test identity: ${details.join('; ')}`);
-  }
+async function cleanupSupabaseBrowserTestUser(testUser: any) {
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(testUser.user.id);
+  if (error && !error.message.toLowerCase().includes('not found')) throw error;
 }
 
-// Helper: authenticate test user in Playwright page
 async function loginAndNavigate(page: Page, testUser: any, targetPath: string) {
-  await page.goto('/login');
-  await page.fill('input[id="login-email"]', testUser.user.email);
-  await page.fill('input[id="login-password"]', `Pass_${testUser.runId}!`);
-  await page.click('button[type="submit"]');
-  await page.waitForURL('**/dashboard*', { timeout: 15000 });
+  await loginSupabaseTestUser(page, { ...testUser, email: testUser.user.email });
   await page.goto(targetPath);
   await page.waitForLoadState('domcontentloaded');
+}
+
+async function nativeBrowserAccessToken(page: Page) {
+  const cookies = (await page.context().cookies())
+    .filter(cookie => /^sb-.+-auth-token(?:\.\d+)?$/.test(cookie.name))
+    .sort((a, b) => Number(a.name.split('.').at(-1) || 0) - Number(b.name.split('.').at(-1) || 0));
+  const encoded = decodeURIComponent(cookies.map(cookie => cookie.value).join(''));
+  const session = JSON.parse(encoded.startsWith('base64-') ? Buffer.from(encoded.slice(7), 'base64url').toString('utf8') : encoded);
+  if (!session.access_token) throw new Error('Native browser session cookie is missing.');
+  return session.access_token as string;
 }
 
 // Helper: Seed F1 (Completed Main Auction, no Mini session)
@@ -824,12 +720,12 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-013 — Refresh During Mini Auction
   // ==========================================================================
   test('MA-MINI-013 — Refresh During Mini Auction', async ({ page }) => {
-    const hostUser = await createClerkDisposableTestUser();
+    const hostUser = await createSupabaseBrowserTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
     try {
-      await loginClerkTestUser(page, hostUser);
+      await loginSupabaseTestUser(page, hostUser);
       const f2 = await setupF2MiniInitialized(hostUser, runId);
       roomId = f2.roomId;
 
@@ -869,7 +765,7 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       try {
         if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
       } finally {
-        await cleanupClerkDisposableTestUser(hostUser);
+        await cleanupSupabaseBrowserTestUser(hostUser);
       }
     }
   });
@@ -878,8 +774,8 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-014 — Reconnect / Second Context Recovery
   // ==========================================================================
   test('MA-MINI-014 — Reconnect / Second Context Recovery', async ({ browser }) => {
-    const hostUser = await createClerkDisposableTestUser();
-    const secondUser = await createClerkDisposableTestUser();
+    const hostUser = await createSupabaseBrowserTestUser();
+    const secondUser = await createSupabaseBrowserTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
@@ -889,8 +785,8 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
     try {
       const hostPage = await hostContext.newPage();
       const secondPage = await secondContext.newPage();
-      await loginClerkTestUser(hostPage, hostUser);
-      await loginClerkTestUser(secondPage, secondUser);
+      await loginSupabaseTestUser(hostPage, hostUser);
+      await loginSupabaseTestUser(secondPage, secondUser);
 
       const f3 = await setupF3SelectionClosed(hostUser, runId);
       roomId = f3.roomId;
@@ -971,8 +867,8 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       try {
         if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
       } finally {
-        await cleanupClerkDisposableTestUser(secondUser);
-        await cleanupClerkDisposableTestUser(hostUser);
+        await cleanupSupabaseBrowserTestUser(secondUser);
+        await cleanupSupabaseBrowserTestUser(hostUser);
       }
     }
   });
@@ -1018,12 +914,12 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-016 — Full Main → Summary → Mini Lifecycle (Serial Full Lifecycle)
   // ==========================================================================
   test('MA-MINI-016 — Full Main → Summary → Mini Lifecycle', async ({ page }) => {
-    const hostUser = await createClerkDisposableTestUser();
+    const hostUser = await createSupabaseBrowserTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
     try {
-      await loginClerkTestUser(page, hostUser);
+      await loginSupabaseTestUser(page, hostUser);
 
       // 1. Seed the completed main auction with one sold and one unsold existing lot.
       const auctionSetup = await setupF1CompletedAuction(hostUser, runId);
@@ -1032,11 +928,11 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       const hostTeamId = auctionSetup.hostTeamId;
       const players = [auctionSetup.p1, auctionSetup.p2];
 
-      const clerkToken = await page.evaluate(async () => (window as any).Clerk?.session?.getToken({ template: 'supabase' }));
-      expect(clerkToken).toBeTruthy();
+      const nativeToken = await nativeBrowserAccessToken(page);
+      expect(nativeToken).toBeTruthy();
       const roomRead = await page.request.get(
         `${process.env.SUPABASE_TEST_URL}/rest/v1/rooms?id=eq.${roomId}&select=id,host_id`,
-        { headers: { apikey: process.env.SUPABASE_TEST_ANON_KEY!, authorization: `Bearer ${clerkToken}` } }
+        { headers: { apikey: process.env.SUPABASE_TEST_ANON_KEY!, authorization: `Bearer ${nativeToken}` } }
       );
       expect(roomRead.ok()).toBe(true);
       expect(await roomRead.json()).toEqual([
@@ -1114,7 +1010,7 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       try {
         if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
       } finally {
-        await cleanupClerkDisposableTestUser(hostUser);
+        await cleanupSupabaseBrowserTestUser(hostUser);
       }
     }
   });

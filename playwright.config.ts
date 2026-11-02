@@ -19,7 +19,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'node scripts/check-port.js && npm run build && node scripts/start-prod.js',
+    command: 'npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: false,
     timeout: 120000,

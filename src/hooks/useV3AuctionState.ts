@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import { V3AuctionState, V3Auction, V3AuctionLot, V3Team, V3Player } from '@/lib/v3-auction-types';
 import { reconcileAuthoritativeLot, reconcileRealtimeLot } from '@/lib/auction/auction-state-sync';
 
@@ -30,16 +30,9 @@ export function useV3AuctionState(roomId: string) {
     authRef.current = { isLoaded, isSignedIn, getToken };
   }, [isLoaded, isSignedIn, getToken]);
 
-  const supabase = useMemo(
-    () =>
-      createClient(async () => {
-        if (!authRef.current.isLoaded || !authRef.current.isSignedIn) return null;
-        return authRef.current.getToken({ template: 'supabase' });
-      }),
-    []
-  );
+  const supabase = useMemo(() => createClient(), []);
 
-  // Synchronize Realtime authentication with Clerk JWT
+  // Synchronize Realtime authentication with Supabase Auth JWT
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
 
@@ -47,7 +40,7 @@ export function useV3AuctionState(roomId: string) {
 
     const syncRealtimeToken = async () => {
       try {
-        const token = await getToken({ template: 'supabase' });
+        const token = await getToken();
         if (!cancelled && token) {
           await supabase.realtime.setAuth(token);
         }
@@ -110,7 +103,7 @@ export function useV3AuctionState(roomId: string) {
 
   const fetchState = useCallback(async () => {
     if (!roomId) return;
-    if (!isLoaded) return; // Wait for Clerk authentication to resolve
+    if (!isLoaded) return; // Wait for Supabase Auth authentication to resolve
     if (!isSignedIn) {
       if (mountedRef.current) {
         setError('Authentication required');
@@ -496,9 +489,9 @@ export function useV3AuctionState(roomId: string) {
 
     const channelId = `v3_auction_${auctionId}_instance_${instanceId}`;
 
-    // Ensure Realtime socket has the authenticated Clerk token before subscribing
+    // Ensure Realtime socket has the authenticated Supabase Auth token before subscribing
     if (authRef.current.isLoaded && authRef.current.isSignedIn) {
-      authRef.current.getToken({ template: 'supabase' }).then((token) => {
+      authRef.current.getToken().then((token) => {
         if (token && mountedRef.current) {
           supabase.realtime.setAuth(token).catch(() => {});
         }

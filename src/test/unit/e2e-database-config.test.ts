@@ -108,7 +108,9 @@ describe('isolated Playwright database target guard', () => {
   it('loads the guard before building/starting an isolated server and does not reuse an existing server', () => {
     const config = fs.readFileSync(path.resolve(process.cwd(), 'playwright.config.ts'), 'utf8');
     expect(config.indexOf('e2e-target-guard')).toBeLessThan(config.indexOf('export default'));
-    expect(config).toContain('node scripts/check-port.js && npm run build && node scripts/start-prod.js');
+    expect(config).toContain("command: 'npm run dev'");
+    const packageJson = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'));
+    expect(packageJson.scripts.dev).toContain('node scripts/check-port.js');
     expect(config).toContain('reuseExistingServer: false');
     expect(config).not.toContain("dotenv.config({ path: '.env.local' })");
   });

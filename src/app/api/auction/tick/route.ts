@@ -6,6 +6,7 @@ import { executeAuctionTick } from '@/lib/auction/auction-orchestrator';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
+export const maxDuration = 10;
 
 export async function POST(request: Request) {
   const expectedSecret = getConfiguredAuctionTickSecret();

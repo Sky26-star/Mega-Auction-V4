@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import { Navbar } from '@/components/layout/navbar';
 import { AuctionRoomHeader } from '@/components/rooms/auction-room-header';
 import { AuctionStatusBar } from '@/components/rooms/auction-status-bar';

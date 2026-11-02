@@ -16,5 +16,5 @@ major_version = 17
 enabled = false
 
 [auth.third_party.clerk]
-enabled = true
+enabled = false
 domain = "helped-hound-8084.clerk.accounts.dev"

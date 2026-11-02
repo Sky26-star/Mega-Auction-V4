@@ -4,7 +4,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
-import { useUser, useClerk } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import { Gavel, LogOut, LayoutDashboard, LogIn, UserPlus, Users, BarChart3, ArrowLeftRight, Menu } from 'lucide-react';
 
 export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
@@ -12,19 +12,20 @@ export function Navbar({ auctionRoom = false }: { auctionRoom?: boolean }) {
   const params = useParams();
   const roomId = params?.id as string | undefined;
   
-  const { isLoaded, isSignedIn, user } = useUser();
-  const { signOut } = useClerk();
+  const { isLoaded, isSignedIn, user, signOut } = useAuth();
 
   const handleSignOut = async () => {
     try {
       await signOut();
       router.push('/login');
+      router.refresh();
     } catch (error) {
       console.error('Error signing out:', error);
     }
   };
 
-  const displayName = user?.firstName || user?.username || user?.primaryEmailAddress?.emailAddress?.split('@')[0] || 'User';
+  const displayName = [user?.user_metadata?.display_name, user?.user_metadata?.full_name, user?.email?.split('@')[0]]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0) || 'User';
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-[#2A312D] bg-[#0B0F0D]/90 backdrop-blur-xl supports-[backdrop-filter]:bg-[#0B0F0D]/60 shadow-lg shadow-black/50">

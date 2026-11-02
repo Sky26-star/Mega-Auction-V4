@@ -28,7 +28,7 @@ export function AuthCompletion() {
           return;
         }
 
-        if (result.error === 'MIGRATION_REQUIRED') {
+        if (result.error === 'MIGRATION_REQUIRED' || result.error === 'PROFILE_REQUIRED') {
           setMessage(result.message || 'This account needs an administrator to complete its profile migration.');
           return;
         }

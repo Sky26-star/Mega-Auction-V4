@@ -18,6 +18,9 @@ import { executeAuctionTick } from '@/lib/auction/auction-orchestrator';
 import { evaluateBotsForLot,  } from '@/lib/auction/server-bot-engine';
 import type { V3Team, V3Player } from '@/lib/v3-auction-types';
 
+// Exercise the deferred bot engine explicitly; production human rooms keep it off.
+vi.mock('@/lib/feature-flags', () => ({ AUCTION_BOTS_ENABLED: true }));
+
 describe('Phase 16 Stage 1 â€” Mini Auction Bot Context Correction', () => {
   const auctionId = '11111111-1111-1111-1111-111111111111';
   const roomId = '22222222-2222-2222-2222-222222222222';

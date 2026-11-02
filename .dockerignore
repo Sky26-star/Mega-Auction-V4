@@ -11,8 +11,7 @@ out
 build
 
 # Environment files (secrets injected via Fly secrets)
-.env*.local
-.env
+.env*
 
 # Git
 .git

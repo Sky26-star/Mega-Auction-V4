@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import { createClient } from '@/lib/supabase/client';
 import { V3Player } from '@/lib/v3-auction-types';
 
@@ -23,14 +23,14 @@ export function useV3Squad(auctionId: string | null) {
   const getSupabaseToken = useCallback(async () => {
     const auth = authRef.current;
     if (!auth.isLoaded) {
-      throw new Error('Clerk authentication is not ready.');
+      throw new Error('Supabase Auth authentication is not ready.');
     }
     if (!auth.isSignedIn) {
       throw new Error('Authentication required to load squad data.');
     }
 
     try {
-      const token = await auth.getToken({ template: 'supabase' });
+      const token = await auth.getToken();
       if (!token) {
         throw new Error('Supabase authentication token is unavailable.');
       }
@@ -40,10 +40,7 @@ export function useV3Squad(auctionId: string | null) {
     }
   }, []);
 
-  const supabase = useMemo(
-    () => createClient(getSupabaseToken, { requireAuth: true }),
-    [getSupabaseToken]
-  );
+  const supabase = useMemo(() => createClient(), []);
   const mountedRef = useRef(true);
   const fetchSeqRef = useRef(0);
 
@@ -76,7 +73,7 @@ export function useV3Squad(auctionId: string | null) {
       setLoading(true);
       setError(null);
 
-      // Verify the Clerk Supabase token before building a protected request.
+      // Verify the Supabase Auth Supabase token before building a protected request.
       await getSupabaseToken();
       if (seq !== fetchSeqRef.current) return;
 

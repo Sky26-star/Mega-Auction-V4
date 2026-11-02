@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import { useV3Squad } from '@/hooks/useV3Squad';
 import { useV3Stats } from '@/hooks/useV3Stats';
 import * as clientModule from '@/lib/supabase/client';
 
-vi.mock('@clerk/nextjs', () => ({
+vi.mock('@/components/providers/auth-provider', () => ({
   useAuth: vi.fn(),
 }));
 
@@ -57,7 +57,7 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
       expect(mockSupabase.channel).not.toHaveBeenCalled();
     });
 
-    it('Clerk not loaded: waits without requesting protected squad data', async () => {
+    it('Supabase Auth not loaded: waits without requesting protected squad data', async () => {
       authState.isLoaded = false;
       const { result, rerender } = renderHook(() => useV3Squad('auc-1'));
 
@@ -100,7 +100,7 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
       expect(mockSupabase.from).not.toHaveBeenCalled();
     });
 
-    it('Waits for the Clerk token before starting the protected squad query', async () => {
+    it('Waits for the Supabase Auth token before starting the protected squad query', async () => {
       let resolveToken!: (token: string) => void;
       authState.getToken.mockReturnValue(new Promise((resolve) => {
         resolveToken = resolve;
@@ -115,7 +115,7 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
 
       renderHook(() => useV3Squad('auc-1'));
 
-      await waitFor(() => expect(authState.getToken).toHaveBeenCalledWith({ template: 'supabase' }));
+      await waitFor(() => expect(authState.getToken).toHaveBeenCalledWith());
       expect(mockSupabase.from).not.toHaveBeenCalled();
 
       await act(async () => resolveToken('test-supabase-token'));
@@ -178,7 +178,7 @@ describe('Phase 3 Regression Tests: useV3Squad and useV3Stats Loading & Race Han
 
       expect(result.current.squadPlayers).toEqual([]);
       expect(result.current.error).toBeNull();
-      expect(authState.getToken).toHaveBeenCalledWith({ template: 'supabase' });
+      expect(authState.getToken).toHaveBeenCalledWith();
     });
 
     it('Fetch errors: sets error state and settles loading to false', async () => {

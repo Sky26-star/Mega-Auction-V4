@@ -429,12 +429,15 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           const requestId = crypto.randomUUID();
 
           const { data, error, rpcError, acceptedAmount, persistedAmount, isApplied } = await submitBotBid(
-            () => supabase.rpc('v3_place_bid', {
+            () => supabase.rpc('v3_place_bot_bid', {
               p_auction_id: auction.id,
               p_lot_id: lot.id,
               p_team_id: bid.teamId,
               p_request_id: requestId,
-              p_is_bot: true
+              p_expected_current_bid: bid.expectedCurrentBid,
+              p_expected_highest_bidder_team_id: bid.expectedHighestBidderTeamId,
+              p_expected_next_bid_amount: bid.expectedNextBidAmount,
+              p_maximum_bid: Math.floor(bid.maximumBid),
             }),
             {
               auctionId: auction.id,

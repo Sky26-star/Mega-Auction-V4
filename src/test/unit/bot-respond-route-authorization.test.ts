@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   evaluateBotTradeResponse: vi.fn(),
 }));
 
-vi.mock('@clerk/nextjs/server', () => ({ auth: mocks.auth }));
+vi.mock('@/lib/auth/server-session', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => mocks.admin }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => mocks.caller }));
 vi.mock('@/lib/trade/bot-trade-evaluator', () => ({

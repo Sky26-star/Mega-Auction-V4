@@ -1,6 +1,6 @@
 import React from 'react';
 import { redirect } from 'next/navigation';
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/server-session';
 import { ProfileForm } from '@/components/auth/profile-form';
 import { Navbar } from '@/components/layout/navbar';
 import { getCurrentMappedProfile } from '@/lib/auth/server-profile';

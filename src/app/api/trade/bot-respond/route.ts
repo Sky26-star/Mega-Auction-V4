@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/server-session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { evaluateBotTradeResponse } from '@/lib/trade/bot-trade-evaluator';
@@ -48,18 +48,8 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
     const callerClient = await createServerClient();
 
-    // 1. Resolve Clerk User identity to internal profile ID
-    const { data: mapping } = await admin
-      .from('clerk_user_mappings')
-      .select('profile_id')
-      .eq('clerk_user_id', userId)
-      .maybeSingle();
-
-    const profileId = mapping?.profile_id || userId;
+    // Native Auth IDs are profile IDs; historical mappings grant no new access.
     const userIdsToCheck = [userId];
-    if (mapping?.profile_id && mapping.profile_id !== userId) {
-      userIdsToCheck.push(mapping.profile_id);
-    }
 
     // 2. Fetch the target trade record
     const { data: trade, error: tradeErr } = await admin
@@ -100,9 +90,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const isHost =
-      room.host_id === userId ||
-      (mapping?.profile_id ? room.host_id === mapping.profile_id : false);
+    const isHost = room.host_id === userId;
 
     const { data: participant } = await admin
       .from('room_participants')

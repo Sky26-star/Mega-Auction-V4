@@ -1,68 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const mocks = vi.hoisted(() => ({
-  auth: vi.fn(),
-  createAdminClient: vi.fn(),
-}));
-
-vi.mock('@clerk/nextjs/server', () => ({ auth: mocks.auth }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), createAdminClient: vi.fn() }));
+vi.mock('@/lib/auth/server-session', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: mocks.createAdminClient }));
-
 import { verifyAdminUser } from '@/lib/admin/auth';
-
-function adminClient(profile: { id: string; is_admin: boolean } | null) {
-  const mappingChain = {
-    select: vi.fn(() => mappingChain),
-    eq: vi.fn(() => mappingChain),
-    maybeSingle: vi.fn().mockResolvedValue({ data: { profile_id: 'mapped-profile-id' }, error: null }),
-  };
-  const profileChain = {
-    select: vi.fn(() => profileChain),
-    eq: vi.fn(() => profileChain),
-    maybeSingle: vi.fn().mockResolvedValue({
-      data: profile ? { ...profile, username: 'person', display_name: 'Person', avatar_url: null, created_at: '', updated_at: '' } : null,
-      error: null,
-    }),
-  };
-  return {
-    from: vi.fn((table: string) => table === 'clerk_user_mappings' ? mappingChain : profileChain),
-    mappingChain,
-    profileChain,
-  };
+function client(profile: unknown) {
+  const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain), maybeSingle: vi.fn().mockResolvedValue({ data: profile, error: null }) };
+  return { from: vi.fn(() => chain), chain };
 }
-
-describe('server-side admin profile authorization', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ userId: 'clerk-user-id' });
+describe('server-side native admin authorization', () => {
+  beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'verified-user-id' }); });
+  it('reads the verified UUID admin flag through the server-only client', async () => {
+    const db = client({ id: 'verified-user-id', is_admin: true });
+    mocks.createAdminClient.mockReturnValue(db);
+    expect((await verifyAdminUser()).authorized).toBe(true);
+    expect(db.from).toHaveBeenCalledExactlyOnceWith('profiles');
+    expect(db.chain.eq).toHaveBeenCalledWith('id', 'verified-user-id');
   });
-
-  it('authorizes only the mapped profile and reads is_admin through the service client', async () => {
-    const client = adminClient({ id: 'mapped-profile-id', is_admin: true });
-    mocks.createAdminClient.mockReturnValue(client);
-
-    const result = await verifyAdminUser();
-
-    expect(result.authorized).toBe(true);
-    expect(result.profile?.is_admin).toBe(true);
-    expect(client.mappingChain.eq).toHaveBeenCalledWith('clerk_user_id', 'clerk-user-id');
-    expect(client.profileChain.eq).toHaveBeenCalledWith('id', 'mapped-profile-id');
-    expect(client.profileChain.select).toHaveBeenCalledWith('id, username, display_name, avatar_url, is_admin, created_at, updated_at');
+  it('denies ordinary users and missing profiles', async () => {
+    for (const profile of [{ id: 'verified-user-id', is_admin: false }, null]) {
+      mocks.createAdminClient.mockReturnValue(client(profile));
+      expect((await verifyAdminUser()).authorized).toBe(false);
+    }
   });
-
-  it('denies a mapped profile that is not an admin', async () => {
-    mocks.createAdminClient.mockReturnValue(adminClient({ id: 'mapped-profile-id', is_admin: false }));
-    const result = await verifyAdminUser();
-    expect(result.authorized).toBe(false);
-    expect(result.error).toContain('FORBIDDEN');
-  });
-
-  it('fails closed if the Clerk-to-profile mapping cannot be resolved', async () => {
-    const client = adminClient(null);
-    client.mappingChain.maybeSingle.mockResolvedValue({ data: null, error: null });
-    mocks.createAdminClient.mockReturnValue(client);
-    const result = await verifyAdminUser();
-    expect(result.authorized).toBe(false);
-    expect(client.from).toHaveBeenCalledTimes(1);
+  it('does not access a privileged client for signed-out callers', async () => {
+    mocks.auth.mockResolvedValue({ userId: null });
+    expect((await verifyAdminUser()).authorized).toBe(false);
+    expect(mocks.createAdminClient).not.toHaveBeenCalled();
   });
 });
