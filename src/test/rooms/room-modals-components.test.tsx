@@ -6,9 +6,15 @@ import { TeamModal } from '@/components/rooms/team-modal';
 import { RoomInviteModal } from '@/components/rooms/room-invite-modal';
 import type { Room, Team } from '@/lib/types/room';
 
+const featureFlags = vi.hoisted(() => ({ botsEnabled: false }));
+vi.mock('@/lib/feature-flags', () => ({
+  get AUCTION_BOTS_ENABLED() { return featureFlags.botsEnabled; },
+}));
+
 describe('Room Modals & Components Test Suite', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    featureFlags.botsEnabled = false;
   });
 
   describe('RoomSettingsModal Component', () => {
@@ -74,12 +80,37 @@ describe('Room Modals & Components Test Suite', () => {
       expect(onClose).toHaveBeenCalled();
     });
 
-    it('toggles bot opponents ON and auto-defaults bot count to 4 if previously 0', () => {
+    it('hides bot controls and saves zero bots when the feature is disabled', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
       render(
         <RoomSettingsModal
           isOpen={true}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
+          onClose={onClose}
+          onSubmit={onSubmit}
+          initialData={{ ...mockRoom, settings: { ...mockRoom.settings, bot_count: 4 } }}
+        />
+      );
+
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+      expect(screen.queryByText('BOT OPPONENTS')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /SAVE SETTINGS/i }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ bot_count: 0 }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('toggles bot opponents ON and auto-defaults bot count to 4 if previously 0', async () => {
+      // Exercise the enabled UI in this test only; the release flag stays false.
+      featureFlags.botsEnabled = true;
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      render(
+        <RoomSettingsModal
+          isOpen={true}
+          onClose={onClose}
+          onSubmit={onSubmit}
           initialData={mockRoom}
         />
       );
@@ -92,6 +123,11 @@ describe('Room Modals & Components Test Suite', () => {
 
       // Bot count stepper should now appear with default 4 AI Managers
       expect(screen.getByText('4 AI MANAGERS')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /SAVE SETTINGS/i }));
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ bot_count: 4 }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('clamps stepper values within bounds and updates display', () => {
