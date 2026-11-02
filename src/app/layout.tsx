@@ -15,7 +15,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/auth/complete"
+      signUpFallbackRedirectUrl="/auth/complete"
+    >
       <html lang="en" className="dark">
         <body>
           <ClerkSupabaseTokenBridge />

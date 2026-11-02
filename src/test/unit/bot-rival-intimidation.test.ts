@@ -469,7 +469,7 @@ describe('Behavior B11: Rival Intimidation', () => {
     });
 
     // B11 Intimidated: Conservative bot drops with RIVAL_INTIMIDATION and submits no bids
-    expect(evidenceIntimidated[0]?.decision).toBe('DROP');
+    expect(evidenceIntimidated[0]?.decision).toBe('PASS');
     expect(evidenceIntimidated[0]?.actionReason).toBe('RIVAL_INTIMIDATION');
     expect(bidsIntimidated.length).toBe(0);
 
@@ -485,8 +485,8 @@ describe('Behavior B11: Rival Intimidation', () => {
     expect(bidsAggressive.length).toBe(1);
     expect(bidsAggressive[0]?.nextBidAmount).toBe(525);
 
-    // B8 Separation: Opportunistic bot drops with RIVAL_BAIT_DROP
-    expect(evidenceOpportunistic[0]?.decision).toBe('DROP');
+    // B8 Separation: Opportunistic bot temporarily passes with RIVAL_BAIT_DROP
+    expect(evidenceOpportunistic[0]?.decision).toBe('PASS');
     expect(evidenceOpportunistic[0]?.actionReason).toBe('RIVAL_BAIT_DROP');
     expect(bidsOpportunistic.length).toBe(0);
   });

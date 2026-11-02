@@ -340,7 +340,7 @@ describe('PHASE 1–8: Strategic Scenarios A through M', () => {
     );
 
     // Team value should be reduced compared to an empty roster team
-    expect(evidence[0]!.decision).toBe('DROP');
+    expect(evidence[0]!.decision).toBe('PASS');
     expect(evidence[0]!.finalAction).toBe('PASS');
     expect(validBids).toHaveLength(0);
   });

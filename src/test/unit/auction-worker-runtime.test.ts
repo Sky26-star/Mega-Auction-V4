@@ -8,6 +8,7 @@ describe('auction worker runtime', () => {
     expect(isRecoverableTickError(new AuctionTickHttpError(503))).toBe(false);
     expect(isRecoverableTickError(new AuctionTickHttpError(429))).toBe(true);
     expect(isRecoverableTickError(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }))).toBe(true);
+    expect(isRecoverableTickError(new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }))).toBe(true);
     expect(isRecoverableTickError(Object.assign(new Error('permission denied'), { code: 'EACCES' }))).toBe(false);
     expect(isRecoverableTickError(new TypeError('fetch failed'))).toBe(false);
   });
@@ -114,7 +115,9 @@ describe('auction worker runtime', () => {
         calls += 1;
         await Promise.resolve();
         active -= 1;
-        if (calls === 1) throw new AuctionTickTimeoutError(10_000);
+        if (calls === 1) {
+          throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+        }
         controller.abort();
       },
       wait: async (ms) => { delays.push(ms); },

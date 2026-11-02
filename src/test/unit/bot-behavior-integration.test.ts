@@ -28,7 +28,7 @@ import {
 import { evaluateQAndTV } from '@/lib/auction/bot-q-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
 
-describe('B1–B17 Cross-Behavior Integration Gate', () => {
+describe('B1â€“B17 Cross-Behavior Integration Gate', () => {
   const auctionId = 'auction-gate-b1-b17';
   const auctionId2 = 'auction-gate-secondary';
   const botTeamAlpha = 'bot-team-alpha';
@@ -75,7 +75,7 @@ describe('B1–B17 Cross-Behavior Integration Gate', () => {
   // ============================================================
   it('1. B1 Role Need + B2 Scarcity + B10 Purse Health: Critical need & high scarcity bid within TV, bounded by purse solvency', () => {
     const wkPlayer = makePlayer('gate-wk-1', { role: 'WICKET_KEEPER', base_price: 100 });
-    
+
     // Bot with 0 WKs has CRITICAL role need (B1)
     const bot = makeBot(botTeamAlpha, { purse: 6000, players_bought: 5 });
     const { need } = getRoleNeed('WICKET_KEEPER', 0, 20, 25);
@@ -415,7 +415,7 @@ describe('B1–B17 Cross-Behavior Integration Gate', () => {
       evidenceEarly,
       auctionId
     );
-    expect(evidenceEarly[0]!.decision).toBe('DROP');
+    expect(evidenceEarly[0]!.decision).toBe('PASS');
     expect(evidenceEarly[0]!.actionReason).toBe('EARLY_RESOURCE_PRESERVATION');
 
     // B17: Rival purchases completed, captured in memory

@@ -28,7 +28,7 @@ export function AuthForm() {
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
-      router.replace('/dashboard');
+      router.replace('/auth/complete');
     }
   }, [isLoaded, isSignedIn, router]);
 
@@ -45,7 +45,7 @@ export function AuthForm() {
     // User already has an active Clerk session.
     // Never start another OAuth flow.
     if (isSignedIn) {
-      router.replace('/dashboard');
+      router.replace('/auth/complete');
       return;
     }
 
@@ -57,7 +57,7 @@ export function AuthForm() {
       await clerk.client.signIn.authenticateWithRedirect({
         strategy,
         redirectUrl: '/sso-callback',
-        redirectUrlComplete: '/dashboard',
+        redirectUrlComplete: '/auth/complete',
       });
     } catch (err: any) {
       console.error(
@@ -85,7 +85,7 @@ export function AuthForm() {
     // If session became active while the user was on this screen,
     // go to dashboard instead of starting another sign-in flow.
     if (isSignedIn) {
-      router.replace('/dashboard');
+      router.replace('/auth/complete');
       return;
     }
 
@@ -205,7 +205,7 @@ export function AuthForm() {
 
           // Full navigation ensures the new Clerk session is
           // recognized by the server before dashboard loads.
-          window.location.href = '/dashboard';
+          window.location.href = '/auth/complete';
         } else {
           setErrorMsg('Verification incomplete.');
         }
@@ -233,7 +233,7 @@ export function AuthForm() {
 
         // Full navigation ensures the new Clerk session is
         // recognized by the server before dashboard loads.
-        window.location.href = '/dashboard';
+        window.location.href = '/auth/complete';
       } else {
         setErrorMsg('Verification incomplete.');
       }

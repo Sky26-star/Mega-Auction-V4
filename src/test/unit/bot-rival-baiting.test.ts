@@ -399,7 +399,7 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     });
 
     // B8 Triggered: Opportunistic bot drops with RIVAL_BAIT_DROP and submits no bids
-    expect(evidenceTriggered[0]?.decision).toBe('DROP');
+    expect(evidenceTriggered[0]?.decision).toBe('PASS');
     expect(evidenceTriggered[0]?.actionReason).toBe('RIVAL_BAIT_DROP');
     expect(bidsTriggered.length).toBe(0);
 

@@ -10,6 +10,18 @@ const TARGET_INTERVAL_MS = 500;
 const controller = new AbortController();
 let shutdownSignal: NodeJS.Signals | undefined;
 
+function getNetworkErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  const visited = new Set<unknown>();
+  while (current && typeof current === 'object' && !visited.has(current)) {
+    visited.add(current);
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'string') return candidate.code;
+    current = candidate.cause;
+  }
+  return undefined;
+}
+
 function requestShutdown(signal: NodeJS.Signals): void {
   if (shutdownSignal) return;
   shutdownSignal = signal;
@@ -52,8 +64,11 @@ async function runWorker(): Promise<void> {
     signal: controller.signal,
     intervalMs: TARGET_INTERVAL_MS,
     computeDelay: (count) => retryDelayWithJitter(count),
-    onTransientError: (_error, retryCount, delayMs) => {
-      console.warn(`[WORKER] Temporary tick failure; retry ${retryCount} in ${delayMs}ms.`);
+    onTransientError: (error, retryCount, delayMs) => {
+      const message = error instanceof Error ? error.message : 'Temporary network or HTTP failure.';
+      const code = getNetworkErrorCode(error);
+      const details = code ? ` (${code})` : '';
+      console.warn(`[WORKER] Temporary tick failure: ${message}${details}; retry ${retryCount} in ${delayMs}ms.`);
     },
     onFatalError: (error) => {
       const message = error instanceof Error ? error.message : 'Unknown tick failure.';

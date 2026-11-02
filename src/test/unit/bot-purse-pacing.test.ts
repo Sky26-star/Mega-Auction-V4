@@ -148,7 +148,7 @@ describe('Behavior B3: Strategic Purse-Pacing Stage', () => {
       // Bot should DROP due to EARLY_RESOURCE_PRESERVATION
       expect(bids.length).toBe(0);
       expect(evidenceArr.length).toBe(1);
-      expect(evidenceArr[0]!.decision).toBe('DROP');
+      expect(evidenceArr[0]!.decision).toBe('PASS');
       expect(evidenceArr[0]!.actionReason).toBe('EARLY_RESOURCE_PRESERVATION');
       expect(evidenceArr[0]!.pacingState).toBe('EARLY_PRESERVATION');
     });
@@ -329,9 +329,9 @@ describe('Behavior B3: Strategic Purse-Pacing Stage', () => {
       );
 
       // Causal divergence proven:
-      // Early bot preserves purse (DROP)
+      // Early bot preserves purse with a temporary PASS.
       expect(bidsEarly.length).toBe(0);
-      expect(evidenceEarly[0]!.decision).toBe('DROP');
+      expect(evidenceEarly[0]!.decision).toBe('PASS');
       expect(evidenceEarly[0]!.pacingState).toBe('EARLY_PRESERVATION');
 
       // Late bot releases purse (ENTER)

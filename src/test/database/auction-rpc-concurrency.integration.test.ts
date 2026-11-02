@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { Client } from 'pg';
 import { resolveDisposableDatabaseTarget } from './disposable-db-guard';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 
 const disposableDatabase = resolveDisposableDatabaseTarget(process.env);
 if (!disposableDatabase.configured) {
@@ -24,7 +25,7 @@ interface SchemaFingerprint {
 }
 
 async function computeTableFingerprints(c: Client): Promise<Record<string, TableFingerprint>> {
-  const tables = ['profiles', 'rooms', 'auctions', 'teams', 'room_participants', 'auction_lots', 'bids'];
+  const tables = ['profiles', 'rooms', 'auctions', 'teams', 'room_participants', 'auction_lots', 'bids', 'bot_lot_state'];
   const result: Record<string, TableFingerprint> = {};
 
   for (const table of tables) {
@@ -47,7 +48,7 @@ async function computeSchemaFingerprints(c: Client): Promise<SchemaFingerprint> 
     FROM pg_proc p
     JOIN pg_namespace n ON p.pronamespace = n.oid
     WHERE n.nspname = 'public'
-      AND p.proname IN ('v3_place_bid', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
+      AND p.proname IN ('v3_place_bid', 'v3_place_bot_bid', 'v3_mark_bot_drop', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
     ORDER BY p.proname, args;
   `);
   const funcHasher = crypto.createHash('sha256');
@@ -56,10 +57,10 @@ async function computeSchemaFingerprints(c: Client): Promise<SchemaFingerprint> 
   }
 
   const privs = await c.query(`
-    SELECT routine_name, specific_name, grantee, privilege_type 
-    FROM information_schema.routine_privileges 
-    WHERE specific_schema = 'public' 
-      AND routine_name IN ('v3_place_bid', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
+    SELECT routine_name, specific_name, grantee, privilege_type
+    FROM information_schema.routine_privileges
+    WHERE specific_schema = 'public'
+      AND routine_name IN ('v3_place_bid', 'v3_place_bot_bid', 'v3_mark_bot_drop', 'v3_finalize_and_advance_lot', 'v3_start_bidding', 'v3_close_mini_selection')
     ORDER BY routine_name, specific_name, grantee, privilege_type;
   `);
   const privHasher = crypto.createHash('sha256');
@@ -89,6 +90,7 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
   const humanTeamId1 = randomUUID();
   const humanTeamId2 = randomUUID();
   const botTeamId = randomUUID();
+  const botTeamId2 = randomUUID();
   const playerId1 = randomUUID();
   const playerId2 = randomUUID();
   const playerId3 = randomUUID();
@@ -132,12 +134,14 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
     const migrationPath = path.resolve(process.cwd(), 'supabase/migrations/20261022100000_auction_rpc_security_hardening.sql');
     let sql = fs.readFileSync(migrationPath, 'utf8');
     await adminClient.query(sql);
+    const botGuardPath = path.resolve(process.cwd(), 'supabase/migrations/20261025160000_guard_stale_bot_bids_and_drops.sql');
+    await adminClient.query(fs.readFileSync(botGuardPath, 'utf8'));
     console.log('[CONCURRENCY SETUP] Inserting fixtures...');
 
     // 3. Create test fixture data
     await adminClient.query(`
       INSERT INTO public.profiles (id, username, display_name)
-      VALUES 
+      VALUES
         ($1, 'concurrent_user_1', 'Concurrent User 1'),
         ($2, 'concurrent_user_2', 'Concurrent User 2');
     `, [humanUserId1, humanUserId2]);
@@ -154,23 +158,25 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
 
     await adminClient.query(`
       INSERT INTO public.teams (id, auction_id, name, short_name, purse, initial_purse, is_bot, players_bought, overseas_count)
-      VALUES 
-        ($1, $4, 'Human Alpha', 'HA', 10000, 10000, false, 0, 0),
-        ($2, $4, 'Human Bravo', 'HB', 10000, 10000, false, 0, 0),
-        ($3, $4, 'Bot Charlie', 'BC', 10000, 10000, true, 0, 0);
-    `, [humanTeamId1, humanTeamId2, botTeamId, auctionId]);
+      VALUES
+        ($1, $5, 'Human Alpha', 'HA', 10000, 10000, false, 0, 0),
+        ($2, $5, 'Human Bravo', 'HB', 10000, 10000, false, 0, 0),
+        ($3, $5, 'Bot Charlie', 'BC', 10000, 10000, true, 0, 0),
+        ($4, $5, 'Bot Delta', 'BD', 10000, 10000, true, 0, 0);
+    `, [humanTeamId1, humanTeamId2, botTeamId, botTeamId2, auctionId]);
 
     await adminClient.query(`
       INSERT INTO public.room_participants (room_id, user_id, team_id, role, is_bot)
-      VALUES 
+      VALUES
         ($1, $2, $4, 'HOST', false),
         ($1, $3, $5, 'MEMBER', false),
-        ($1, NULL, $6, 'MEMBER', true);
-    `, [roomId, humanUserId1, humanUserId2, humanTeamId1, humanTeamId2, botTeamId]);
+        ($1, NULL, $6, 'MEMBER', true),
+        ($1, NULL, $7, 'MEMBER', true);
+    `, [roomId, humanUserId1, humanUserId2, humanTeamId1, humanTeamId2, botTeamId, botTeamId2]);
 
     await adminClient.query(`
       INSERT INTO public.players (id, player_set_id, name, role, base_price, is_overseas)
-      VALUES 
+      VALUES
         ($1, $4, 'Player Concurrency A', 'BATSMAN', 200, false),
         ($2, $4, 'Player Concurrency B', 'BOWLER', 200, false),
         ($3, $4, 'Player Concurrency C', 'ALL_ROUNDER', 200, false);
@@ -226,6 +232,38 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
     }
   }, 30000);
 
+  afterEach(async (context) => {
+    const clients = [
+      { name: 'adminClient', client: adminClient },
+      { name: 'bidderClient1', client: bidderClient1 },
+      { name: 'bidderClient2', client: bidderClient2 },
+      { name: 'finalizerClient', client: finalizerClient },
+    ];
+
+    const cleanupErrors: string[] = [];
+    for (const { name, client } of clients) {
+      if (!client) continue;
+      try {
+        await client.query('ROLLBACK;').catch(() => {});
+        await client.query('RESET ROLE; RESET ALL;');
+      } catch (err: any) {
+        cleanupErrors.push(`${name}: ${err.message}`);
+      }
+    }
+
+    if (cleanupErrors.length > 0) {
+      const summary = cleanupErrors.join('; ');
+      const testFailed =
+        context.task.result?.state === 'fail' ||
+        (context.task.result?.errors && context.task.result.errors.length > 0);
+      if (testFailed) {
+        console.error(`[CONCURRENCY TEST CLEANUP FAILURE after test failure] ${summary}`);
+      } else {
+        throw new Error(`[CONCURRENCY TEST CLEANUP FAILURE] Failed to reset connection state: ${summary}`);
+      }
+    }
+  });
+
   it('1. Proves lock hierarchy prevents deadlocks between concurrent bidding and finalization', async () => {
     // Team 1 is initial highest bidder on lot 1
     await adminClient.query(`
@@ -273,7 +311,7 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
   it('2. Serializes concurrent human bids on the same lot without lost updates or deadlocks', async () => {
     // Reset lot timer to ensure active BIDDING
     await adminClient.query(`
-      UPDATE public.auction_lots 
+      UPDATE public.auction_lots
       SET status = 'BIDDING', timer_expires_at = clock_timestamp() + INTERVAL '15 seconds', highest_bidder_team_id = NULL, current_bid = 200
       WHERE id = $1;
     `, [lotId1]);
@@ -341,10 +379,111 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
     expect(forgedRes.rows[0].res.error).toBe('ERR_BOT_BID_FORBIDDEN');
   });
 
+  it('3a. Rejects stale concurrent bot decisions and enforces the evaluated maximum bid atomically', async () => {
+    await adminClient.query(`
+      UPDATE public.auction_lots
+      SET status = 'BIDDING', current_bid = 200, highest_bidder_team_id = NULL,
+          timer_expires_at = clock_timestamp() + INTERVAL '15 seconds'
+      WHERE id = $1;
+    `, [lotId3]);
+    await adminClient.query(`DELETE FROM public.bids WHERE lot_id = $1;`, [lotId3]);
+
+    await adminClient.query(`SET role = 'service_role';`);
+    await adminClient.query(`SET "request.jwt.claims" = '${JSON.stringify({ role: 'service_role' })}';`);
+    await finalizerClient.query(`SET role = 'service_role';`);
+    await finalizerClient.query(`SET "request.jwt.claims" = '${JSON.stringify({ role: 'service_role' })}';`);
+
+    const [botBidA, botBidB] = await Promise.all([
+      adminClient.query(`
+        SELECT public.v3_place_bot_bid($1, $2, $3, $4, 0, NULL, 200, 1000) AS res;
+      `, [auctionId, lotId3, botTeamId, randomUUID()]),
+      finalizerClient.query(`
+        SELECT public.v3_place_bot_bid($1, $2, $3, $4, 0, NULL, 200, 1000) AS res;
+      `, [auctionId, lotId3, botTeamId2, randomUUID()]),
+    ]);
+    const raceResults = [botBidA.rows[0].res, botBidB.rows[0].res];
+    expect(raceResults.filter((result) => result.success)).toHaveLength(1);
+    expect(raceResults.filter((result) => result.error === 'ERR_STALE_BOT_DECISION')).toHaveLength(1);
+
+    const appliedBids = await adminClient.query(`SELECT COUNT(*)::int AS count FROM public.bids WHERE lot_id = $1;`, [lotId3]);
+    expect(appliedBids.rows[0].count).toBe(1);
+
+    await adminClient.query(`DELETE FROM public.bids WHERE lot_id = $1;`, [lotId3]);
+    await adminClient.query(`
+      UPDATE public.auction_lots
+      SET status = 'BIDDING', current_bid = 600, highest_bidder_team_id = $2,
+          timer_expires_at = clock_timestamp() + INTERVAL '15 seconds'
+      WHERE id = $1;
+    `, [lotId3, humanTeamId1]);
+
+    const overCeiling = await adminClient.query(`
+      SELECT public.v3_place_bot_bid($1, $2, $3, $4, 600, $5, 650, 625) AS res;
+    `, [auctionId, lotId3, botTeamId, randomUUID(), humanTeamId1]);
+    expect(overCeiling.rows[0].res).toMatchObject({
+      success: false,
+      error: 'ERR_BOT_MAXIMUM_BID_EXCEEDED',
+    });
+
+    const unchangedLot = await adminClient.query(`SELECT current_bid, highest_bidder_team_id FROM public.auction_lots WHERE id = $1;`, [lotId3]);
+    expect(unchangedLot.rows[0]).toMatchObject({ current_bid: 600, highest_bidder_team_id: humanTeamId1 });
+    await adminClient.query(`
+      UPDATE public.auction_lots SET status = 'PENDING', current_bid = 200,
+        highest_bidder_team_id = NULL, timer_expires_at = NULL WHERE id = $1;
+    `, [lotId3]);
+  });
+
+  it('3b. Rejects a bot bid evaluated before a human outbid the lot', async () => {
+    await adminClient.query(`DELETE FROM public.bids WHERE lot_id = $1;`, [lotId3]);
+    await adminClient.query(`
+      UPDATE public.auction_lots
+      SET status = 'BIDDING', current_bid = 200, highest_bidder_team_id = $2,
+          timer_expires_at = clock_timestamp() + INTERVAL '15 seconds'
+      WHERE id = $1;
+    `, [lotId3, humanTeamId1]);
+
+    await bidderClient2.query(`SET role = 'authenticated';`);
+    await bidderClient2.query(`SET "request.jwt.claims" = '${JSON.stringify({ sub: humanUserId2, role: 'authenticated' })}';`);
+    await finalizerClient.query(`SET role = 'service_role';`);
+    await finalizerClient.query(`SET "request.jwt.claims" = '${JSON.stringify({ role: 'service_role' })}';`);
+
+    const humanOutbid = await bidderClient2.query(`
+      SELECT public.v3_place_bid($1, $2, $3, $4, false) AS res;
+    `, [auctionId, lotId3, humanTeamId2, randomUUID()]);
+    expect(humanOutbid.rows[0].res).toMatchObject({
+      success: true,
+      amount: 225,
+      highest_bidder_team_id: humanTeamId2,
+    });
+
+    // The bot's snapshot is now stale: the human has already advanced the lot.
+    const staleBotBid = await finalizerClient.query(`
+      SELECT public.v3_place_bot_bid($1, $2, $3, $4, 200, $5, 225, 1000) AS res;
+    `, [auctionId, lotId3, botTeamId, randomUUID(), humanTeamId1]);
+    expect(staleBotBid.rows[0].res).toMatchObject({
+      success: false,
+      error: 'ERR_STALE_BOT_DECISION',
+    });
+
+    const lotAfterRace = await adminClient.query(`
+      SELECT current_bid, highest_bidder_team_id FROM public.auction_lots WHERE id = $1;
+    `, [lotId3]);
+    expect(lotAfterRace.rows[0]).toMatchObject({ current_bid: 225, highest_bidder_team_id: humanTeamId2 });
+    const botBids = await adminClient.query(`
+      SELECT COUNT(*)::int AS count FROM public.bids WHERE lot_id = $1 AND team_id = $2;
+    `, [lotId3, botTeamId]);
+    expect(botBids.rows[0].count).toBe(0);
+
+    await adminClient.query(`DELETE FROM public.bids WHERE lot_id = $1;`, [lotId3]);
+    await adminClient.query(`
+      UPDATE public.auction_lots SET status = 'PENDING', current_bid = 200,
+        highest_bidder_team_id = NULL, timer_expires_at = NULL WHERE id = $1;
+    `, [lotId3]);
+  });
+
   it('4. Enforces distributed advisory lock: concurrent worker finalizations cannot duplicate', async () => {
     // Set timer to expired so both workers attempt finalization
     await adminClient.query(`
-      UPDATE public.auction_lots 
+      UPDATE public.auction_lots
       SET timer_expires_at = clock_timestamp() - INTERVAL '5 seconds'
       WHERE id = $1;
     `, [lotId1]);
@@ -379,7 +518,7 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
     expect(parseInt(squadCheck.rows[0].count, 10)).toBe(1);
   });
 
-  it('5. Exercises complete end-to-end bot lifecycle: GET_READY -> START_BIDDING -> BOT_BID -> FINALIZE -> SOLD', async () => {
+  it.skipIf(!AUCTION_BOTS_ENABLED)('5. Exercises complete end-to-end bot lifecycle: GET_READY -> START_BIDDING -> BOT_BID -> FINALIZE -> SOLD', async () => {
     // Switch auction current_lot_id to lot 2
     await adminClient.query(`
       UPDATE public.auctions SET current_lot_id = $1 WHERE id = $2;
@@ -420,5 +559,28 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
     // Next lot is now in GET_READY status
     const nextLot = await adminClient.query(`SELECT status FROM public.auction_lots WHERE id = $1;`, [lotId3]);
     expect(nextLot.rows[0].status).toBe('GET_READY');
+  });
+
+  it('6. Persists a permanent bot DROP across updates and worker connections', async () => {
+    await adminClient.query(`
+      UPDATE public.auction_lots
+      SET status = 'BIDDING', timer_expires_at = clock_timestamp() + INTERVAL '15 seconds'
+      WHERE id = $1;
+    `, [lotId3]);
+    const markedDrop = await adminClient.query(`
+      SELECT public.v3_mark_bot_drop($1, $2, $3, 500) AS res;
+    `, [auctionId, lotId3, botTeamId]);
+    expect(markedDrop.rows[0].res.success).toBe(true);
+
+    await adminClient.query(`
+      UPDATE public.bot_lot_state SET is_interested = true WHERE lot_id = $1 AND team_id = $2;
+    `, [lotId3, botTeamId]);
+
+    const persistedDrop = await finalizerClient.query(`
+      SELECT is_interested, is_dropped, dropped_at FROM public.bot_lot_state WHERE lot_id = $1 AND team_id = $2;
+    `, [lotId3, botTeamId]);
+    expect(persistedDrop.rows[0].is_interested).toBe(false);
+    expect(persistedDrop.rows[0].is_dropped).toBe(true);
+    expect(persistedDrop.rows[0].dropped_at).toBeTruthy();
   });
 });

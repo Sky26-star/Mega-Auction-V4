@@ -288,7 +288,7 @@ describe('Behavior B6: Opportunity Cost / Alternative Availability', () => {
     });
 
     // Downstream contrast
-    expect(evidenceAttr[0]?.decision).toBe('DROP');
+    expect(evidenceAttr[0]?.decision).toBe('PASS');
     expect(evidenceAttr[0]?.actionReason).toBe('PRICE_EXCEEDS_TV');
     expect(evidenceAttr[0]?.tv).toBe(925);
     expect(bidsAttr).toHaveLength(0); // Drops out: preserves purse for future alternative

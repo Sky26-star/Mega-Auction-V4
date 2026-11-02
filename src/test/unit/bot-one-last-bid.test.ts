@@ -533,7 +533,7 @@ describe('Behavior B13: One-Last-Bid', () => {
     expect(bidsEligible[0]?.nextBidAmount).toBeLessThanOrEqual(evidenceEligible[0]!.tv);
 
     // Scenario 2: Repeat call drops after the accepted RPC result was recorded.
-    expect(evidenceRepeat[0]?.decision).toBe('DROP');
+    expect(evidenceRepeat[0]?.decision).toBe('PASS');
     expect(bidsRepeat.length).toBe(0);
 
     // Scenario 3: Ineligible drops with 0 bids

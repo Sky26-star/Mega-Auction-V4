@@ -1,7 +1,16 @@
 import { AuctionTickHttpError, AuctionTickTimeoutError } from './tick-client';
 
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 504]);
-const RETRYABLE_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN']);
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
 
 export function isRecoverableTickError(error: unknown): boolean {
   if (error instanceof AuctionTickTimeoutError) return true;

@@ -152,7 +152,7 @@ test.describe('Phase 1–8 Strategic Behaviour E2E Suite', () => {
     const trace = evidence[0]!;
 
     expect(trace.finalAction).toBe('PASS');
-    expect(trace.decision).toBe('DROP');
+    expect(trace.decision).toBe('PASS');
     expect(validBids.length).toBe(0);
   });
 });

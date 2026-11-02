@@ -532,8 +532,8 @@ describe('Behavior B14: Late Entry Reversal', () => {
       TV: evidenceLate[0]?.tv,
     });
 
-    // 1. BEFORE: Bot rationally drops to preserve purse
-    expect(evidenceEarly[0]?.decision).toBe('DROP');
+    // 1. BEFORE: Bot temporarily passes to preserve purse and can reconsider later.
+    expect(evidenceEarly[0]?.decision).toBe('PASS');
     expect(evidenceEarly[0]?.actionReason).toBe('EARLY_RESOURCE_PRESERVATION');
     expect(evidenceEarly[0]?.pacingState).toBe('EARLY_PRESERVATION');
     expect(bidsEarly.length).toBe(0);

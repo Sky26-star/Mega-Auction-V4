@@ -34,7 +34,7 @@ export default async function DashboardPage() {
 
   // No authenticated Clerk session → login.
   if (!userId) {
-    redirect('/login');
+    redirect('/sign-in');
   }
 
   // ------------------------------------------------------------
@@ -51,7 +51,7 @@ export default async function DashboardPage() {
   // Fetch User Profile
   // ------------------------------------------------------------
   const profile = await getCurrentMappedProfile();
-  if (!profile) redirect('/login');
+  if (!profile) redirect('/auth/complete');
   const { authorized: isAdmin } = await verifyAdminUser();
 
   // ------------------------------------------------------------

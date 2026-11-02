@@ -1,4 +1,5 @@
 import { recordBotBidObservation } from './bot-brain-memory';
+import { getAuctionRpcFailure } from './rpc-response';
 
 export interface BotBidSubmissionOptions {
   auctionId: string;
@@ -16,10 +17,8 @@ export async function submitBotBid(
   options: BotBidSubmissionOptions
 ) {
   const { data, error } = await submit();
-  const rpcSuccess = !error && Boolean(data && data.success === true);
-  const rpcError = error
-    ? error.message
-    : (Boolean(data && data.success === false) ? (data?.error || 'REJECTED') : null);
+  const rpcError = getAuctionRpcFailure(data, error, 'RPC did not return a successful confirmation.');
+  const rpcSuccess = rpcError === null;
 
   let acceptedAmount: number | null = null;
   let persistedAmount: number | null = null;

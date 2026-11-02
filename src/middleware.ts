@@ -7,11 +7,19 @@ const isProtectedRoute = createRouteMatcher([
   '/rooms(.*)',
 ]);
 
-export default clerkMiddleware(async (auth, request) => {
-  if (isProtectedRoute(request)) {
-    await auth.protect();
+export default clerkMiddleware(
+  async (auth, request) => {
+    if (isProtectedRoute(request)) {
+      await auth.protect();
+    }
+  },
+  {
+    signInUrl: '/sign-in',
+    signUpUrl: '/sign-up',
+    afterSignInUrl: '/auth/complete',
+    afterSignUpUrl: '/auth/complete',
   }
-});
+);
 
 export const config = {
   matcher: [

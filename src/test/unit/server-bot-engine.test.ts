@@ -139,6 +139,10 @@ describe('Phase 8 — Runtime Integration & Validation', () => {
     expect(bids[0]!.teamId).toBe(bot.id);
     expect(bids[0]!.nextBidAmount).toBe(expectedNextBid);
     expect(bids[0]!.nextBidAmount).toBe(ev.bidAmount);
+    expect(bids[0]!.expectedCurrentBid).toBe(currentBid);
+    expect(bids[0]!.expectedHighestBidderTeamId).toBeNull();
+    expect(bids[0]!.expectedNextBidAmount).toBe(expectedNextBid);
+    expect(bids[0]!.maximumBid).toBe(ev.maximumBid);
   });
 
   // =========================================================================
@@ -239,7 +243,8 @@ describe('Phase 8 — Runtime Integration & Validation', () => {
     const ev = evidenceArr[0]!;
     expect(ev.strategicCommitment).toBe('NOT_COMMITTED');
     expect(ev.finalAction).toBe('PASS');
-    expect(ev.decision).toBe('DROP');
+    expect(ev.decision).toBe('PASS');
+    expect(ev.permanentDrop).toBe(false);
     expect(bids.length).toBe(0);
   });
 
@@ -273,6 +278,7 @@ describe('Phase 8 — Runtime Integration & Validation', () => {
     expect(ev.pricePosition).toBe('BEYOND_CEILING');
     expect(ev.finalAction).toBe('PASS');
     expect(ev.decision).toBe('DROP');
+    expect(ev.permanentDrop).toBe(true);
     expect(bids.length).toBe(0);
     expect(ev.reasons?.[0]).toContain('exceeds maximum rational bid ceiling');
   });
@@ -308,6 +314,36 @@ describe('Phase 8 — Runtime Integration & Validation', () => {
     expect(bids.length).toBe(1);
     // Verifies runtime did not invent an independent second ceiling
     expect(ev.decision).not.toBe('DROP');
+  });
+
+  it('isolates a bot evaluation exception so a later healthy bot can still bid', () => {
+    const brokenBot = makeBot({ id: 'bot-broken' });
+    Object.defineProperty(brokenBot, 'personality', {
+      get() { throw new Error('invalid personality state'); },
+    });
+    const healthyBot = makeBot({ id: 'bot-healthy' });
+    const evidence: BotDecisionEvidence[] = [];
+
+    const bids = evaluateBotsForLot(
+      [brokenBot, healthyBot],
+      makePlayer({ rating: 90 }),
+      100,
+      100,
+      undefined,
+      'Normal',
+      [brokenBot, healthyBot],
+      { [brokenBot.id]: [], [healthyBot.id]: [] },
+      makeCtx(),
+      null,
+      evidence,
+      'auction-error-isolation'
+    );
+
+    expect(evidence.find((entry) => entry.teamId === brokenBot.id)).toMatchObject({
+      decision: 'SKIP',
+      actionReason: 'BOT_EVALUATION_ERROR',
+    });
+    expect(bids.map((bid) => bid.teamId)).toEqual([healthyBot.id]);
   });
 
   // =========================================================================

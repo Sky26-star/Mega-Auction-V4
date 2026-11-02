@@ -63,20 +63,29 @@ describe('Bot Intelligence Performance Benchmark', () => {
       image_url: null
     };
 
-    // Warmup run
-    evaluateBotsForLot(bots, currentLotPlayer, 300, 200, undefined, 'Normal', bots, {}, ctx, null);
-
-    // Suppress console I/O during pure algorithm benchmarking so terminal write buffer latency is not measured
+    // Suppress console I/O during warmup and timed benchmarking so terminal write buffer latency is not measured
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Warmup runs (3 iterations) to allow V8 Turbofan JIT compilation of hot bot evaluation paths
+    for (let w = 0; w < 3; w++) {
+      evaluateBotsForLot(bots, currentLotPlayer, 300, 200, undefined, 'Normal', bots, {}, ctx, null);
+    }
 
     // Timed benchmark across 10 iterations (representing 10 auction ticks)
     const iterations = 10;
+    const lotLatencies: number[] = [];
     const start = performance.now();
     for (let i = 0; i < iterations; i++) {
+      const lotStart = performance.now();
       evaluateBotsForLot(bots, currentLotPlayer, 300 + i * 25, 200, bots[i % 10]!.id, 'Normal', bots, {}, ctx, null);
+      lotLatencies.push(performance.now() - lotStart);
     }
     const elapsedMs = performance.now() - start;
     errorSpy.mockRestore();
+    logSpy.mockRestore();
+
+    const maxMsPerLot = Math.max(...lotLatencies);
     const avgMsPerLot = elapsedMs / iterations;
     const avgMsPerBot = avgMsPerLot / bots.length;
 
@@ -86,13 +95,18 @@ describe('Bot Intelligence Performance Benchmark', () => {
     console.log(`Future candidates pool size: ${futurePlayers.length}`);
     console.log(`Total time for ${iterations} lots: ${elapsedMs.toFixed(2)}ms`);
     console.log(`Average time per lot: ${avgMsPerLot.toFixed(2)}ms`);
+    console.log(`Worst lot latency (outlier check): ${maxMsPerLot.toFixed(2)}ms`);
     console.log(`Average time per bot decision: ${avgMsPerBot.toFixed(2)}ms`);
     console.log(`Worker cadence target: 500ms`);
     console.log(`Cadence headroom: ${(500 - avgMsPerLot).toFixed(2)}ms (${((500 - avgMsPerLot) / 500 * 100).toFixed(1)}%)`);
     console.log(`======================================================\n`);
 
-    // Performance assert: average lot evaluation must be comfortably below 100ms (5x faster than 500ms cadence)
+    // Performance regression asserts:
+    // 1. Average lot evaluation must be strictly below 100ms (5x faster than 500ms cadence)
+    // 2. Average bot decision latency must be strictly below 10ms (100 bots/sec capacity)
+    // 3. Outlier protection: slowest single lot evaluation must remain well below 150ms (>70% cadence margin)
     expect(avgMsPerLot).toBeLessThan(100);
     expect(avgMsPerBot).toBeLessThan(10);
+    expect(maxMsPerLot).toBeLessThan(150);
   });
 });

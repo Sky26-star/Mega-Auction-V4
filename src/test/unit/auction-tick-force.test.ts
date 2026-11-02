@@ -35,7 +35,11 @@ function queryResult(data: unknown) {
   return query;
 }
 
-function setup(lotStatus: string, timerExpiresAt: string) {
+function setup(
+  lotStatus: string,
+  timerExpiresAt: string,
+  getReadyExpiresAt = new Date(Date.now() + 60_000).toISOString()
+) {
   mocks.from.mockImplementation((table: string) => queryResult(
     table === 'auctions'
       ? [auction]
@@ -47,7 +51,7 @@ function setup(lotStatus: string, timerExpiresAt: string) {
           base_price: 100,
           highest_bidder_team_id: null,
           timer_expires_at: timerExpiresAt,
-          get_ready_expires_at: new Date(Date.now() + 60_000).toISOString(),
+          get_ready_expires_at: getReadyExpiresAt,
           player_id: 'player-1',
           players: null,
         }
@@ -137,6 +141,34 @@ describe('auction tick finalization is due-only', () => {
       p_lot_id: 'lot-1',
       p_force: false,
     });
+  });
+
+  it('does not report GET_READY transition as applied when RPC returns no result', async () => {
+    setup('GET_READY', new Date(Date.now() + 60_000).toISOString(), new Date(Date.now() - 1_000).toISOString());
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: null });
+
+    const response = await tick();
+    const body = await response.json();
+
+    expect(body.actions).toContainEqual(expect.objectContaining({
+      action: 'START_BIDDING_FAILED',
+      error: 'RPC returned no successful result.',
+    }));
+    expect(body.actions).not.toContainEqual(expect.objectContaining({ action: 'START_BIDDING' }));
+  });
+
+  it('does not report finalization as applied when the RPC returns a transport error', async () => {
+    setup('BIDDING', new Date(Date.now() - 60_000).toISOString());
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: 'database unavailable' } });
+
+    const response = await tick();
+    const body = await response.json();
+
+    expect(body.actions).toContainEqual(expect.objectContaining({
+      action: 'FINALIZE_LOT_FAILED',
+      error: 'database unavailable',
+    }));
+    expect(body.actions).not.toContainEqual(expect.objectContaining({ action: 'FINALIZE_LOT' }));
   });
 
   it('accepts the configured server credential for an authorized normal tick', async () => {

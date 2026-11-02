@@ -14,13 +14,13 @@ export const metadata = {
 export default async function ProfilePage() {
   const { userId } = await auth();
   if (!userId) {
-    redirect('/login');
+    redirect('/sign-in');
   }
 
   const profile = await getCurrentMappedProfile();
 
   if (!profile) {
-    redirect('/login');
+    redirect('/auth/complete');
   }
 
   const { authorized: isAdmin } = await verifyAdminUser();

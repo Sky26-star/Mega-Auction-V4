@@ -21,7 +21,7 @@ describe('resolveDisposableDatabaseTarget', () => {
   });
 
   it('rejects malformed URLs without echoing the input', () => {
-    const malformed = 'postgresql://secret-password-is-private';
+    const malformed = 'postgresql://secret-password-is-private:invalid-port/postgres';
     let message = '';
 
     try {

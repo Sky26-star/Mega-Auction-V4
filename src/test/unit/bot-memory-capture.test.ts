@@ -13,6 +13,7 @@ import {
   type AuctionContext,
   type BotDecisionEvidence
 } from '@/lib/auction/server-bot-engine';
+import { submitBotBid } from '@/lib/auction/bot-bid-submission';
 import { evaluatePursePacing } from '@/lib/auction/bot-tactical-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
 
@@ -57,7 +58,7 @@ describe('Behavior B17-A: Memory Capture & State Update', () => {
   // ============================================================
   // TEST 1 — OWN ACTION CAPTURE
   // ============================================================
-  it('TEST 1 — OWN ACTION CAPTURE: Bot performs real bid through server path, capturing observation in memory', () => {
+  it('TEST 1 — OWN ACTION CAPTURE: Bot memory records a bid only after the server RPC accepts it', async () => {
     const candidatePlayer = makePlayer('lot-own-bid-1', { base_price: 100 });
     const serverBot = makeBot(botA, { purse: 6000, initial_purse: 10000 });
     const rival = makeBot(botB, { purse: 8000 });
@@ -85,10 +86,17 @@ describe('Behavior B17-A: Memory Capture & State Update', () => {
       auctionId
     );
 
-    // AFTER EVENT: Bot entered, placed next required bid 225, and captured it into memory
+    // The candidate is only a proposal until the authoritative RPC accepts it.
     expect(validBids.length).toBe(1);
     expect(validBids[0]!.nextBidAmount).toBe(225);
+    expect(getBotMemory(auctionId, serverBot.id).observedBids[candidatePlayer.id]).toBeUndefined();
 
+    await submitBotBid(
+      async () => ({ data: { success: true, amount: 225, current_bid: 225 }, error: null }),
+      { auctionId, teamId: serverBot.id, playerId: candidatePlayer.id }
+    );
+
+    // AFTER ACCEPTANCE: the committed amount is captured in bot memory.
     const memAfter = getBotMemory(auctionId, serverBot.id);
     const ownObs = memAfter.observedBids[candidatePlayer.id];
 
