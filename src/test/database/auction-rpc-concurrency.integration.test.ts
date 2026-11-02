@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { Client } from 'pg';
 import { resolveDisposableDatabaseTarget } from './disposable-db-guard';
-import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 
 const disposableDatabase = resolveDisposableDatabaseTarget(process.env);
 if (!disposableDatabase.configured) {
@@ -518,47 +517,70 @@ describe.skipIf(!disposableDatabase.configured)('Auction RPC Multi-Connection Co
     expect(parseInt(squadCheck.rows[0].count, 10)).toBe(1);
   });
 
-  it.skipIf(!AUCTION_BOTS_ENABLED)('5. Exercises complete end-to-end bot lifecycle: GET_READY -> START_BIDDING -> BOT_BID -> FINALIZE -> SOLD', async () => {
-    // Switch auction current_lot_id to lot 2
-    await adminClient.query(`
-      UPDATE public.auctions SET current_lot_id = $1 WHERE id = $2;
-    `, [lotId2, auctionId]);
+  it('5. Exercises complete end-to-end bot lifecycle: GET_READY -> START_BIDDING -> BOT_BID -> FINALIZE -> SOLD', async () => {
+    // These SQL RPCs remain available to service_role independently of the
+    // product's worker/UI bot flag. Test them even in the human-only release.
+    await adminClient.query('BEGIN;');
+    try {
+      const before = await adminClient.query(`
+        SELECT purse, players_bought FROM public.teams WHERE id = $1;
+      `, [botTeamId]);
 
-    // 1. Worker detects eligible GET_READY lot with expired get_ready timer, starts bidding
-    const startRes = await adminClient.query(`
-      SELECT public.v3_start_bidding($1, $2, true) AS res;
-    `, [auctionId, lotId2]);
+      // Own the starting state so this test also runs without preceding tests.
+      await adminClient.query(`
+        UPDATE public.auctions
+        SET current_lot_id = $1, current_lot_index = 2, status = 'IN_PROGRESS'
+        WHERE id = $2;
+      `, [lotId2, auctionId]);
+      await adminClient.query(`
+        UPDATE public.auction_lots
+        SET status = 'GET_READY', current_bid = base_price,
+            highest_bidder_team_id = NULL, timer_expires_at = NULL,
+            get_ready_expires_at = clock_timestamp() - INTERVAL '1 second'
+        WHERE id = $1;
+      `, [lotId2]);
+      await adminClient.query(`SET LOCAL role = 'service_role';`);
+      await adminClient.query(`SELECT set_config('request.jwt.claims', $1, true);`, [
+        JSON.stringify({ role: 'service_role' }),
+      ]);
 
-    expect(startRes.rows[0].res.success).toBe(true);
-    expect(startRes.rows[0].res.status).toBe('BIDDING');
+      const startRes = await adminClient.query(`
+        SELECT public.v3_start_bidding($1, $2, true) AS res;
+      `, [auctionId, lotId2]);
+      expect(startRes.rows[0].res.success).toBe(true);
+      expect(startRes.rows[0].res.status).toBe('BIDDING');
 
-    // 2. Bot evaluates and places first bid at base price
-    const botBidReqId = randomUUID();
-    const bidRes = await adminClient.query(`
-      SELECT public.v3_place_bid($1, $2, $3, $4, true) AS res;
-    `, [auctionId, lotId2, botTeamId, botBidReqId]);
+      const botBidReqId = randomUUID();
+      const bidRes = await adminClient.query(`
+        SELECT public.v3_place_bid($1, $2, $3, $4, true) AS res;
+      `, [auctionId, lotId2, botTeamId, botBidReqId]);
+      expect(bidRes.rows[0].res.success).toBe(true);
+      expect(bidRes.rows[0].res.amount).toBe(200);
+      expect(bidRes.rows[0].res.highest_bidder_team_id).toBe(botTeamId);
 
-    expect(bidRes.rows[0].res.success).toBe(true);
-    expect(bidRes.rows[0].res.amount).toBe(200);
-    expect(bidRes.rows[0].res.highest_bidder_team_id).toBe(botTeamId);
+      const finRes = await adminClient.query(`
+        SELECT public.v3_finalize_and_advance_lot($1, $2, true) AS res;
+      `, [auctionId, lotId2]);
+      expect(finRes.rows[0].res.success).toBe(true);
+      expect(finRes.rows[0].res.status).toBe('SOLD');
+      expect(finRes.rows[0].res.next_lot_id).toBe(lotId3);
 
-    // 3. Force-finalize lot 2 (simulating timer expiration)
-    const finRes = await adminClient.query(`
-      SELECT public.v3_finalize_and_advance_lot($1, $2, true) AS res;
-    `, [auctionId, lotId2]);
+      const botCheck = await adminClient.query(`
+        SELECT purse, players_bought FROM public.teams WHERE id = $1;
+      `, [botTeamId]);
+      expect(botCheck.rows[0].purse).toBe(before.rows[0].purse - 200);
+      expect(botCheck.rows[0].players_bought).toBe(before.rows[0].players_bought + 1);
+      const squadCheck = await adminClient.query(`
+        SELECT team_id, purchase_price FROM public.squad_players WHERE lot_id = $1;
+      `, [lotId2]);
+      expect(squadCheck.rows).toEqual([{ team_id: botTeamId, purchase_price: 200 }]);
 
-    expect(finRes.rows[0].res.success).toBe(true);
-    expect(finRes.rows[0].res.status).toBe('SOLD');
-    expect(finRes.rows[0].res.next_lot_id).toBe(lotId3);
-
-    // 4. Verify purse and squad balance for bot team
-    const botCheck = await adminClient.query(`SELECT purse, players_bought FROM public.teams WHERE id = $1;`, [botTeamId]);
-    expect(botCheck.rows[0].purse).toBe(9550); // 9750 - 200 = 9550
-    expect(botCheck.rows[0].players_bought).toBe(2);
-
-    // Next lot is now in GET_READY status
-    const nextLot = await adminClient.query(`SELECT status FROM public.auction_lots WHERE id = $1;`, [lotId3]);
-    expect(nextLot.rows[0].status).toBe('GET_READY');
+      const nextLot = await adminClient.query(`SELECT status FROM public.auction_lots WHERE id = $1;`, [lotId3]);
+      expect(nextLot.rows[0].status).toBe('GET_READY');
+    } finally {
+      // Restore fixtures and connection-local authorization even on failure.
+      await adminClient.query('ROLLBACK;');
+    }
   });
 
   it('6. Persists a permanent bot DROP across updates and worker connections', async () => {

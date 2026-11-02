@@ -67,10 +67,12 @@ jobs:
       - name: Database-Backed Integration Verification (Fail if Skipped)
         env:
           DISPOSABLE_TEST_DATABASE_URL: postgresql://postgres:postgrespassword@127.0.0.1:55325/mega_auction_test
+        # Both suites reinstall shared RPCs; keep their multi-client races inside sequential files.
         run: |
           npx vitest run \
             src/test/database/auction-rpc-concurrency.integration.test.ts \
             src/test/database/auction-rpc-security.integration.test.ts \
+            --no-file-parallelism \
             --reporter=default \
             --reporter=json \
             --outputFile=db-test-results.json
