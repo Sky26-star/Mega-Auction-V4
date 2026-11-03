@@ -84,6 +84,27 @@ jobs:
           DISPOSABLE_TEST_DATABASE_URL: postgresql://postgres:postgrespassword@127.0.0.1:55325/mega_auction_test
         run: node scripts/check-release-database.mjs
 
+      - name: Fresh Project Grants and Realtime Compatibility
+        run: |
+          container=$(docker run --detach --network none \
+            --label mega-auction.purpose=fresh-project-validation-ci \
+            --tmpfs /var/lib/postgresql/data:rw,size=768m \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=mega_auction_test \
+            postgres:17-alpine postgres -p 55325 -c wal_level=logical)
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" psql -X -h /var/run/postgresql -p 55325 -U postgres -d mega_auction_test -c 'SELECT 1' >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs "$container"
+            exit 1
+          fi
+          node scripts/check-fresh-project-database.mjs --container "$container"
+
       - name: Full Unit & Regression Suite (Vitest)
         run: npm run test:run -- --maxWorkers=2
 
