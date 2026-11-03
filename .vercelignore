@@ -23,7 +23,7 @@ coverage/
 .git/
 scratch/
 src/test/
-docs/
-supabase/
+/docs/
+/supabase/
 node_modules/
 {{.Destination}}
