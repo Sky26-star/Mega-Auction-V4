@@ -253,14 +253,14 @@ function generateBotCounterOffer(params: {
 /**
  * Generates an autonomous, deterministic trade proposal from a Bot team targeting another franchise.
  */
-export function generateBotTradeProposal(params: {
+export function generateBotTradeProposals(params: {
   botTeam: V3Team;
   botRoster: V3Player[];
   otherTeams: V3Team[];
   allRostersByTeamId: Record<string, V3Player[]>;
   maxSquadSize?: number;
   maxOverseas?: number;
-}): BotProposalCandidate | null {
+}): BotProposalCandidate[] {
   const {
     botTeam,
     botRoster,
@@ -270,112 +270,104 @@ export function generateBotTradeProposal(params: {
     maxOverseas = DEFAULT_MAX_OVERSEAS,
   } = params;
 
-  if (botRoster.length < 2) return null;
+  if (botRoster.length === 0) return [];
 
-  // 1. Identify bot's biggest role deficit
   const roleCounts: Record<string, number> = {
     BATSMAN: 0,
     BOWLER: 0,
     ALL_ROUNDER: 0,
     WICKET_KEEPER: 0,
   };
-
-  botRoster.forEach(p => {
-    if (roleCounts[p.role] !== undefined) {
-      roleCounts[p.role] = (roleCounts[p.role] || 0) + 1;
-    }
+  botRoster.forEach(player => {
+    if (roleCounts[player.role] !== undefined) roleCounts[player.role] = (roleCounts[player.role] || 0) + 1;
   });
 
-  let biggestDeficitRole: string | null = null;
-  let maxDeficit = 0;
+  const deficitRoles = Object.entries(IDEAL_ROLE_COUNTS)
+    .map(([role, ideal]) => ({ role, deficit: ideal - (roleCounts[role] || 0) }))
+    .filter(({ deficit }) => deficit > 0)
+    .sort((a, b) => b.deficit - a.deficit);
+  if (deficitRoles.length === 0) return [];
 
-  for (const [role, ideal] of Object.entries(IDEAL_ROLE_COUNTS)) {
-    const count = roleCounts[role] || 0;
-    const deficit = ideal - count;
-    if (deficit > maxDeficit) {
-      maxDeficit = deficit;
-      biggestDeficitRole = role;
-    }
-  }
-
-  if (!biggestDeficitRole || maxDeficit <= 0) {
-    return null; // Squad is already balanced
-  }
-
-  // 2. Identify bot's surplus role
   let surplusRole: string | null = null;
   let maxSurplus = 0;
-
   for (const [role, ideal] of Object.entries(IDEAL_ROLE_COUNTS)) {
-    const count = roleCounts[role] || 0;
-    const surplus = count - ideal;
+    const surplus = (roleCounts[role] || 0) - ideal;
     if (surplus > maxSurplus) {
       maxSurplus = surplus;
       surplusRole = role;
     }
   }
-
   if (!surplusRole) {
-    // Pick the role with the most players
-    const sortedRoles = Object.entries(roleCounts).sort((a, b) => b[1] - a[1]);
-    surplusRole = sortedRoles[0]?.[0] || 'BATSMAN';
+    surplusRole = Object.entries(roleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   }
+  if (!surplusRole) return [];
 
-  // Pick surplus player from bot's bench (lowest base price in that role)
-  const candidateOutgoing = botRoster
-    .filter(p => p.role === surplusRole)
-    .sort((a, b) => a.base_price - b.base_price)[0];
+  const outgoingCandidates = botRoster
+    .filter(player => player.role === surplusRole)
+    .sort((a, b) => a.base_price - b.base_price);
+  const candidates: BotProposalCandidate[] = [];
 
-  if (!candidateOutgoing) return null;
+  for (const { role: neededRole } of deficitRoles) {
+    const partnerIdeal = IDEAL_ROLE_COUNTS[neededRole] || 2;
+    for (const partner of otherTeams) {
+      if (partner.id === botTeam.id) continue;
+      const partnerRoster = allRostersByTeamId[partner.id] || [];
+      const incomingCandidates = partnerRoster
+        .filter(player => player.role === neededRole)
+        .sort((a, b) => a.base_price - b.base_price);
+      if (incomingCandidates.length <= partnerIdeal) continue;
 
-  // 3. Find partner team with surplus in biggestDeficitRole
-  for (const partner of otherTeams) {
-    if (partner.id === botTeam.id) continue;
-    const partnerRoster = allRostersByTeamId[partner.id] || [];
+      for (const outgoing of outgoingCandidates) {
+        for (const incoming of incomingCandidates) {
+          if (outgoing.id === incoming.id) continue;
+          const validation = validateTradeConstraints({
+            proposerTeam: botTeam,
+            receiverTeam: partner,
+            proposerPlayers: [outgoing],
+            receiverPlayers: [incoming],
+            maxSquadSize,
+            maxOverseas,
+          });
+          if (!validation.valid) continue;
 
-    const partnerRoleCount = partnerRoster.filter(p => p.role === biggestDeficitRole).length;
-    const partnerIdeal = IDEAL_ROLE_COUNTS[biggestDeficitRole] || 2;
+          const remainingRoleCount =
+            botRoster.filter(player => player.role === outgoing.role).length - 1 +
+            (incoming.role === outgoing.role ? 1 : 0);
+          if (remainingRoleCount <= 0) continue;
 
-    if (partnerRoleCount > partnerIdeal) {
-      // Partner has surplus in what the bot needs
-      const candidateIncoming = partnerRoster
-        .filter(p => p.role === biggestDeficitRole)
-        .sort((a, b) => a.base_price - b.base_price)[0];
-
-      if (candidateIncoming) {
-        const validation = validateTradeConstraints({
-          proposerTeam: botTeam,
-          receiverTeam: partner,
-          proposerPlayers: [candidateOutgoing],
-          receiverPlayers: [candidateIncoming],
-          maxSquadSize,
-          maxOverseas,
-        });
-
-        if (validation.valid) {
           const fairness = evaluateTradeFairness({
             proposerTeam: botTeam,
             receiverTeam: partner,
-            proposerPlayers: [candidateOutgoing],
-            receiverPlayers: [candidateIncoming],
+            proposerPlayers: [outgoing],
+            receiverPlayers: [incoming],
             proposerRoster: botRoster,
             receiverRoster: partnerRoster,
             maxOverseas,
           });
+          if (fairness.fairnessRatio < 0.90 || fairness.fairnessRatio > 1.20) continue;
 
-          // Must be reasonably fair (0.90 to 1.15)
-          if (fairness.fairnessRatio >= 0.90 && fairness.fairnessRatio <= 1.20) {
-            return {
-              targetTeam: partner,
-              offeredPlayers: [candidateOutgoing],
-              requestedPlayers: [candidateIncoming],
-              notes: `${botTeam.name} proposes a positional exchange to balance ${biggestDeficitRole} depth.`,
-            };
-          }
+          candidates.push({
+            targetTeam: partner,
+            offeredPlayers: [outgoing],
+            requestedPlayers: [incoming],
+            notes: `${botTeam.name} proposes a positional exchange to balance ${neededRole} depth.`,
+          });
         }
       }
     }
   }
 
-  return null;
+  return candidates;
+}
+
+/** Backwards-compatible first-candidate helper for callers that need a single proposal. */
+export function generateBotTradeProposal(params: {
+  botTeam: V3Team;
+  botRoster: V3Player[];
+  otherTeams: V3Team[];
+  allRostersByTeamId: Record<string, V3Player[]>;
+  maxSquadSize?: number;
+  maxOverseas?: number;
+}): BotProposalCandidate | null {
+  return generateBotTradeProposals(params)[0] || null;
 }

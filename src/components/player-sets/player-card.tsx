@@ -15,7 +15,7 @@ interface PlayerCardProps {
 
 export function getRoleStats(player: Player): { label: string; value: string | number }[] {
   const formatVal = (v: number | string | null | undefined): string | number => {
-    if (v === null || v === undefined || v === '') return '-';
+    if (v === null || v === undefined || v === '' || (typeof v === 'number' && Number.isNaN(v))) return '-';
     return v;
   };
 

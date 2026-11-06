@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 import { V3AuctionState, V3Auction, V3AuctionLot, V3Team, V3Player } from '@/lib/v3-auction-types';
+import { reconcileAuthoritativeLot, reconcileRealtimeLot } from '@/lib/auction/auction-state-sync';
 
 let nextV3AuctionStateInstanceId = 0;
 
@@ -29,16 +30,9 @@ export function useV3AuctionState(roomId: string) {
     authRef.current = { isLoaded, isSignedIn, getToken };
   }, [isLoaded, isSignedIn, getToken]);
 
-  const supabase = useMemo(
-    () =>
-      createClient(async () => {
-        if (!authRef.current.isLoaded || !authRef.current.isSignedIn) return null;
-        return authRef.current.getToken({ template: 'supabase' });
-      }),
-    []
-  );
+  const supabase = useMemo(() => createClient(), []);
 
-  // Synchronize Realtime authentication with Clerk JWT
+  // Synchronize Realtime authentication with Supabase Auth JWT
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
 
@@ -46,7 +40,7 @@ export function useV3AuctionState(roomId: string) {
 
     const syncRealtimeToken = async () => {
       try {
-        const token = await getToken({ template: 'supabase' });
+        const token = await getToken();
         if (!cancelled && token) {
           await supabase.realtime.setAuth(token);
         }
@@ -109,7 +103,7 @@ export function useV3AuctionState(roomId: string) {
 
   const fetchState = useCallback(async () => {
     if (!roomId) return;
-    if (!isLoaded) return; // Wait for Clerk authentication to resolve
+    if (!isLoaded) return; // Wait for Supabase Auth authentication to resolve
     if (!isSignedIn) {
       if (mountedRef.current) {
         setError('Authentication required');
@@ -262,32 +256,12 @@ export function useV3AuctionState(roomId: string) {
           }
 
           setState(prev => {
-            let nextLot = rpcLot;
-            if (
-              prev.currentLot &&
-              nextLot &&
-              prev.currentLot.id === nextLot.id
-            ) {
-              const prevBid = Number(prev.currentLot.current_bid ?? 0);
-              const incomingBid = Number(nextLot.current_bid ?? 0);
-              const isStaleStatus = prev.currentLot.status === 'BIDDING' && nextLot.status === 'GET_READY';
-              const effectiveStatus = isStaleStatus ? 'BIDDING' : nextLot.status;
-
-              if (Number.isFinite(prevBid) && Number.isFinite(incomingBid) && prevBid > incomingBid) {
-                nextLot = {
-                  ...nextLot,
-                  status: effectiveStatus,
-                  current_bid: prevBid,
-                  highest_bidder_team_id: prev.currentLot.highest_bidder_team_id,
-                  timer_expires_at: prev.currentLot.timer_expires_at || nextLot.timer_expires_at,
-                };
-              } else if (isStaleStatus) {
-                nextLot = {
-                  ...nextLot,
-                  status: effectiveStatus,
-                };
-              }
-            }
+            const nextLot = reconcileAuthoritativeLot(
+              prev.auction?.id ?? null,
+              prev.currentLot,
+              rpcAuction.id,
+              rpcLot
+            );
 
             return {
               auction: rpcAuction,
@@ -441,32 +415,12 @@ export function useV3AuctionState(roomId: string) {
 
       if (mountedRef.current && seq === fetchSeqRef.current) {
         setState(prev => {
-          let nextLot = currentLot;
-          if (
-            prev.currentLot &&
-            nextLot &&
-            prev.currentLot.id === nextLot.id
-          ) {
-            const prevBid = Number(prev.currentLot.current_bid ?? 0);
-            const incomingBid = Number(nextLot.current_bid ?? 0);
-            const isStaleStatus = prev.currentLot.status === 'BIDDING' && nextLot.status === 'GET_READY';
-            const effectiveStatus = isStaleStatus ? 'BIDDING' : nextLot.status;
-
-            if (Number.isFinite(prevBid) && Number.isFinite(incomingBid) && prevBid > incomingBid) {
-              nextLot = {
-                ...nextLot,
-                status: effectiveStatus,
-                current_bid: prevBid,
-                highest_bidder_team_id: prev.currentLot.highest_bidder_team_id,
-                timer_expires_at: prev.currentLot.timer_expires_at || nextLot.timer_expires_at,
-              };
-            } else if (isStaleStatus) {
-              nextLot = {
-                ...nextLot,
-                status: effectiveStatus,
-              };
-            }
-          }
+          const nextLot = reconcileAuthoritativeLot(
+            prev.auction?.id ?? null,
+            prev.currentLot,
+            auction.id,
+            currentLot
+          );
 
           return {
             auction,
@@ -535,9 +489,9 @@ export function useV3AuctionState(roomId: string) {
 
     const channelId = `v3_auction_${auctionId}_instance_${instanceId}`;
 
-    // Ensure Realtime socket has the authenticated Clerk token before subscribing
+    // Ensure Realtime socket has the authenticated Supabase Auth token before subscribing
     if (authRef.current.isLoaded && authRef.current.isSignedIn) {
-      authRef.current.getToken({ template: 'supabase' }).then((token) => {
+      authRef.current.getToken().then((token) => {
         if (token && mountedRef.current) {
           supabase.realtime.setAuth(token).catch(() => {});
         }
@@ -569,63 +523,13 @@ export function useV3AuctionState(roomId: string) {
         // Apply state instantly to avoid fetch delays/caching issues for timers
         // Apply only non-stale lot updates.
         if (mountedRef.current) {
-          const incomingBid = Number(updatedLot.current_bid);
-
           fetchSeqRef.current++;
 
           setState((prev) => {
             const currentLot = prev.currentLot;
-
-            // Update for the same lot
-            if (currentLot && currentLot.id === updatedLot.id) {
-              const displayedBid = Number(currentLot.current_bid);
-
-              // Monotonic bid protection on the SAME lot:
-              // Never move bid backwards while actively bidding
-              if (
-                Number.isFinite(incomingBid) &&
-                Number.isFinite(displayedBid) &&
-                incomingBid < displayedBid &&
-                currentLot.status === 'BIDDING' &&
-                updatedLot.status === 'BIDDING'
-              ) {
-                return {
-                  ...prev,
-                  currentLot: {
-                    ...currentLot,
-                    ...updatedLot,
-                    current_bid: displayedBid,
-                    highest_bidder_team_id: currentLot.highest_bidder_team_id || updatedLot.highest_bidder_team_id,
-                  },
-                };
-              }
-
-              return {
-                ...prev,
-                currentLot: {
-                  ...currentLot,
-                  ...updatedLot,
-                },
-              };
-            }
-
-            // Update for a different lot (lot transition or newly active lot)
-            const isNewActiveLot =
-              !currentLot ||
-              updatedLot.status === 'GET_READY' ||
-              updatedLot.status === 'BIDDING' ||
-              (updatedLot.status as string) === 'ACTIVE' ||
-              ((currentLot.status === 'SOLD' || currentLot.status === 'UNSOLD') && updatedLot.lot_index >= currentLot.lot_index);
-
-            if (isNewActiveLot) {
-              // Lot changes must not retain stale bid state from the prior lot
-              return {
-                ...prev,
-                currentLot: updatedLot,
-              };
-            }
-
-            return prev;
+            const nextLot = reconcileRealtimeLot(currentLot, updatedLot);
+            if (nextLot === currentLot) return prev;
+            return { ...prev, currentLot: nextLot };
           });
 
           // If the lot transitioned and player is not yet loaded, load it asynchronously
@@ -730,8 +634,8 @@ export function useV3AuctionState(roomId: string) {
     fetchState
   ]);
 
-  // Authoritative timer expiry watcher: when timer expires locally, ping server tick
-  // and trigger state refresh so the client never stays stuck at 0s.
+  // The authenticated server worker owns transitions. Refresh after expiry so the
+  // client reflects the worker's authoritative state without invoking a global tick.
   useEffect(() => {
     const lot = state.currentLot;
 
@@ -749,13 +653,7 @@ export function useV3AuctionState(roomId: string) {
     const remainingMs = new Date(targetTime).getTime() - Date.now();
     const timeout = setTimeout(() => {
       if (mountedRef.current) {
-        fetch('/api/auction/tick', { method: 'POST' })
-          .catch(() => { })
-          .finally(() => {
-            if (mountedRef.current) {
-              fetchState();
-            }
-          });
+        fetchState();
       }
     }, Math.max(0, remainingMs) + 300);
 

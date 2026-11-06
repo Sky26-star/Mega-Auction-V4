@@ -1,45 +1,32 @@
-// scripts/auction-ticker.js
-// Runs a local interval loop to trigger the Next.js API route tick endpoint.
-// This decouples the authoritative auction lifecycle from the browser.
+// [DEPRECATED] scripts/auction-ticker.js
+// This legacy runner forwards directly to the authoritative background worker.
+// The production and Dockerfile entrypoint is: npm run worker (scripts/worker.ts)
+const { spawn } = require('child_process');
 
-const TICK_INTERVAL_MS = 2000;
-const ENDPOINTS = [
-  'http://[::1]:3000/api/auction/tick',
-  'http://127.0.0.1:3000/api/auction/tick'
-];
+console.log('[AUCTION TICKER] [NOTICE] scripts/auction-ticker.js is deprecated. Forwarding to authoritative worker (npm run worker)...');
 
-console.log(`[AUCTION TICKER] Starting local ticker. Pinging API every ${TICK_INTERVAL_MS}ms...`);
+const isWindows = /^win/.test(process.platform);
+const npmCmd = isWindows ? 'npm.cmd' : 'npm';
 
-setInterval(async () => {
-  let success = false;
-  let lastErr = null;
+const child = spawn(npmCmd, ['run', 'worker'], {
+  stdio: 'inherit',
+  shell: isWindows,
+  env: process.env,
+});
 
-  for (const endpoint of ENDPOINTS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+child.on('exit', (code) => {
+  process.exit(code || 0);
+});
 
-      success = true;
-      if (res.ok) {
-        const data = await res.json();
-        if (data.actions && data.actions.length > 0) {
-          console.log(`[AUCTION TICKER] Actions taken:`, data.actions);
-        }
-      } else {
-        console.error(`[AUCTION TICKER] Error response: ${res.status} ${res.statusText}`);
-      }
-      break; // Stop after a successful connection
-    } catch (err) {
-      lastErr = err;
+function forwardSignal(sig) {
+  if (child && !child.killed) {
+    if (isWindows) {
+      spawn('taskkill', ['/pid', child.pid, '/f', '/t']);
+    } else {
+      child.kill(sig);
     }
   }
+}
 
-  if (!success) {
-    console.error(`[AUCTION TICKER] Connection failed:`);
-    console.error(lastErr?.message || lastErr);
-    if (lastErr?.code) console.error(`Code: ${lastErr.code}`);
-    if (lastErr?.cause) console.error(`Cause:`, lastErr.cause);
-  }
-}, TICK_INTERVAL_MS);
+process.on('SIGINT', () => forwardSignal('SIGINT'));
+process.on('SIGTERM', () => forwardSignal('SIGTERM'));

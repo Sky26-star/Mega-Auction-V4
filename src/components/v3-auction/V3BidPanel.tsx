@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { V3AuctionLot, V3Team } from '@/lib/v3-auction-types';
 import { createClient } from '@/lib/supabase/client';
+import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
 import { Loader2, AlertCircle } from 'lucide-react';
 
 interface V3BidPanelProps {
@@ -51,10 +52,8 @@ export function V3BidPanel({ auctionId, lot, teams, myTeamId, isHost }: V3BidPan
         p_is_bot: false
       });
 
-      if (rpcError) throw rpcError;
-      if (data && !data.success) {
-        setError(data.error || 'Bid failed');
-      }
+      const rpcFailure = getAuctionRpcFailure(data, rpcError, 'Bid request returned no successful result.');
+      if (rpcFailure) setError(rpcFailure);
     } catch (err: any) {
       setError(err.message || 'Failed to place bid');
     } finally {

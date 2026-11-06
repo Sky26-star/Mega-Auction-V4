@@ -1,164 +1,205 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
-import React, { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useParams } from 'next/navigation';
+import { ChevronLeft, ChevronRight, Search, Users } from 'lucide-react';
 import { useV3AuctionContext } from '@/components/rooms/v3/V3AuctionStateProvider';
 import { useV3Squad } from '@/hooks/useV3Squad';
 import { SquadMetrics } from '@/components/rooms/v3/SquadMetrics';
 import { SquadRoleSection } from '@/components/rooms/v3/SquadRoleSection';
-import { Navbar } from '@/components/layout/navbar';
-import { Loader2, AlertCircle, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import { AuctionSelect } from '@/components/ui/auction-select';
+import {
+  AuctionReportLayout,
+  ReportFeedback,
+  ReportTitle,
+  SectionHeading,
+} from '@/components/rooms/v3/auction-report-ui';
+
+const roles = [
+  { value: 'BATSMAN', title: 'Batters' },
+  { value: 'ALL_ROUNDER', title: 'All-rounders' },
+  { value: 'WICKET_KEEPER', title: 'Keepers' },
+  { value: 'BOWLER', title: 'Bowlers' },
+];
 
 export default function SquadManagementPage() {
-  const params = useParams();
-  const router = useRouter();
-  const roomId = params.id as string;
-
-  const { state, loading: stateLoading, error: stateError } = useV3AuctionContext();
-  const auctionId = state.auction?.id || null;
-  const { squadPlayers, loading: squadLoading, error: squadError } = useV3Squad(auctionId);
-
-  const [selectedTeamIndex, setSelectedTeamIndex] = useState(0);
-
+  const { id: roomId } = useParams<{ id: string }>();
+  const { state, loading: stateLoading, error: stateError, refresh } = useV3AuctionContext();
+  const {
+    squadPlayers,
+    loading: squadLoading,
+    error: squadError,
+    refresh: refreshSquad,
+  } = useV3Squad(state.auction?.id || null);
+  const [selectedTeamId, setSelectedTeamId] = useState('');
+  const [role, setRole] = useState('ALL');
+  const [search, setSearch] = useState('');
+  const teams = state.teams || [];
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId) || teams[0];
+  const currentTeamSquad = squadPlayers.filter(
+    (player) => player.winning_team_id === selectedTeam?.id
+  );
+  const filteredPlayers = currentTeamSquad.filter(({ player }) =>
+    player.name.toLowerCase().includes(search.trim().toLowerCase())
+  );
   const loading = stateLoading || squadLoading;
   const error = stateError || squadError;
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0B0F0D] flex flex-col items-center justify-center p-12 space-y-4">
-        <Loader2 className="w-10 h-10 animate-spin text-[#C9A227]" />
-        <p className="text-sm font-mono-numbers text-[#9CA6A0] uppercase tracking-widest">
-          LOADING FRANCHISE DATA...
-        </p>
-      </div>
-    );
-  }
-
-  if (error || !state.auction) {
-    return (
-      <div className="min-h-screen bg-[#0B0F0D] flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-[#B8322E]/10 border-2 border-[#B8322E]/40 p-6 rounded-2xl flex flex-col items-center text-center space-y-4">
-          <AlertCircle className="w-10 h-10 text-[#B8322E]" />
-          <div>
-            <h2 className="text-xl font-bold text-[#F3F4F1] mb-2 uppercase">Command Center Error</h2>
-            <p className="text-[#B8322E] font-mono text-sm">{error || 'Auction not found'}</p>
-          </div>
-          <button
-            onClick={() => router.push(`/rooms/${roomId}`)}
-            className="px-6 py-2 bg-[#141917] border border-[#2A312D] text-[#F3F4F1] rounded-xl hover:bg-[#1E2522] transition-colors"
-          >
-            Return to Lobby
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const teams = state.teams || [];
-
-  if (teams.length === 0) {
-    return (
-      <div className="min-h-screen bg-[#0B0F0D] flex flex-col">
-        <Navbar />
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <p className="text-[#9CA6A0] font-mono uppercase tracking-widest mb-4">No franchises found in this auction.</p>
-          <button
-            onClick={() => router.push(`/rooms/${roomId}/auction`)}
-            className="flex items-center space-x-2 text-xs font-mono text-[#F3F4F1] bg-[#141917] border border-[#2A312D] px-4 py-2 rounded-lg hover:bg-[#1E2522]"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>BACK TO AUCTION</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const selectedTeam = teams[selectedTeamIndex];
-
-  if (!selectedTeam) return null;
-
-  const currentTeamSquad = squadPlayers.filter(p => p.winning_team_id === selectedTeam.id);
-
-  const handleNextTeam = () => setSelectedTeamIndex(prev => (prev + 1) % teams.length);
-  const handlePrevTeam = () => setSelectedTeamIndex(prev => (prev - 1 + teams.length) % teams.length);
+  const selectTeam = (id: string) => {
+    setSelectedTeamId(id);
+    setRole('ALL');
+    setSearch('');
+  };
+  const stepTeam = (direction: number) => {
+    if (!selectedTeam || !teams.length) return;
+    const index = teams.findIndex((team) => team.id === selectedTeam.id);
+    selectTeam(teams[(index + direction + teams.length) % teams.length]!.id);
+  };
 
   return (
-    <div className="min-h-screen bg-[#0B0F0D] flex flex-col text-[#F3F4F1] selection:bg-[#C9A227]/30">
-      <Navbar />
-
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 flex flex-col animate-in fade-in duration-500">
-
-        {/* Navigation & Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-10">
-          <div>
-            <button
-              onClick={() => router.push(`/rooms/${roomId}/auction`)}
-              className="group flex items-center space-x-2 text-xs font-mono text-[#9CA6A0] hover:text-[#C9A227] transition-colors mb-4"
+    <AuctionReportLayout roomId={roomId} active="squad">
+      <div className="grid min-w-0 items-end gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+        <ReportTitle
+          eyebrow="Built at the auction"
+          title="Franchise"
+          accent="squads"
+          description="Your signings, your balance, your next move. Explore every franchise in the room."
+        />
+        {teams.length > 0 && (
+          <div className="min-w-0 rounded-xl border border-[#2A312D] bg-[#141917] p-3 sm:p-4">
+            <label
+              htmlFor="squad-franchise"
+              className="mb-2 block px-1 text-[10px] font-semibold uppercase tracking-wider text-[#9CA6A0]"
             >
-              <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-              <span>RETURN TO LIVE AUCTION</span>
-            </button>
-            <h1 className="text-[10px] sm:text-xs font-mono font-bold text-[#C9A227] uppercase tracking-[0.2em] mb-2">
-              FRANCHISE SQUAD
-            </h1>
-            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black uppercase text-[#F3F4F1] font-display tracking-tight leading-none">
-              BUILD YOUR DYNASTY
-            </h2>
-          </div>
-
-          {/* Franchise Selector */}
-          <div className="flex items-center space-x-4 bg-[#141917] border border-[#2A312D] rounded-2xl p-2 shrink-0">
-            <button
-              onClick={handlePrevTeam}
-              className="p-2 sm:p-3 rounded-xl hover:bg-[#1E2522] text-[#9CA6A0] hover:text-[#F3F4F1] transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
-            </button>
-            <div className="flex flex-col items-center min-w-[200px] sm:min-w-[280px]">
-              <p className="text-[10px] font-mono font-bold text-[#9CA6A0] uppercase tracking-widest mb-1">COMMAND CENTER</p>
-              <p className="text-lg sm:text-xl font-black text-[#F3F4F1] font-display tracking-wider uppercase text-center truncate w-full">
-                {selectedTeam.name}
-              </p>
+              Franchise · {teams.findIndex(team => team.id === selectedTeam?.id) + 1} of {teams.length}
+            </label>
+            <div className="flex min-w-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => stepTeam(-1)}
+                disabled={teams.length < 2}
+                aria-label="Previous franchise"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[#9CA6A0] hover:bg-[#242E27] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227] disabled:opacity-30"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <AuctionSelect
+                id="squad-franchise"
+                label="Select franchise"
+                value={selectedTeam?.id || ''}
+                onValueChange={selectTeam}
+                options={teams.map(team => ({ value: team.id, label: team.name }))}
+                className="flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => stepTeam(1)}
+                disabled={teams.length < 2}
+                aria-label="Next franchise"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[#9CA6A0] hover:bg-[#242E27] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227] disabled:opacity-30"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
             </div>
-            <button
-              onClick={handleNextTeam}
-              className="p-2 sm:p-3 rounded-xl hover:bg-[#1E2522] text-[#9CA6A0] hover:text-[#F3F4F1] transition-colors"
-            >
-              <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
-            </button>
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Dynamic Team Content */}
-        <div
-          key={selectedTeam.id} // Forces re-render/animation on team change
-          className="animate-in slide-in-from-right-4 fade-in duration-500 flex flex-col space-y-12"
-        >
-          {/* Metrics */}
+      {error || (loading && !squadPlayers.length) || !selectedTeam ? (
+        <ReportFeedback
+          loading={loading && !error}
+          error={
+            error ||
+            (!loading && !teams.length ? 'No franchises have joined this auction yet.' : null)
+          }
+          onRetry={() => {
+            void refresh();
+            void refreshSquad();
+          }}
+        />
+      ) : (
+        <>
           <SquadMetrics team={selectedTeam} />
-
-          {/* Squad Roster */}
-          {currentTeamSquad.length === 0 ? (
-            <div className="w-full py-24 border border-dashed border-[#2A312D] rounded-3xl bg-[#141917]/30 flex flex-col items-center justify-center space-y-4">
-              <h3 className="text-2xl font-black text-[#F3F4F1] font-display tracking-tight uppercase">BUILD YOUR SQUAD</h3>
-              <p className="text-sm font-mono text-[#9CA6A0] tracking-widest text-center max-w-md">
-                No acquisitions yet.<br/>Your auction journey starts here.
-              </p>
+          <section className="min-w-0" aria-label={`${selectedTeam.name} roster`}>
+            <SectionHeading
+              title="Squad roster"
+              subtitle={selectedTeam.name}
+              aside={`${currentTeamSquad.length} ${currentTeamSquad.length === 1 ? 'signing' : 'signings'}`}
+            />
+            <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-[#2A312D] bg-[#141917] p-3 xl:flex-row xl:items-center xl:justify-between">
+              <div
+                className="flex min-w-0 flex-wrap gap-1.5"
+                role="group"
+                aria-label="Filter squad by role"
+              >
+                {[{ value: 'ALL', title: 'All players' }, ...roles].map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    aria-pressed={role === item.value}
+                    onClick={() => setRole(item.value)}
+                    className={`min-h-10 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227] ${role === item.value ? 'bg-[#C9A227] text-[#0B0F0D]' : 'text-[#9CA6A0] hover:bg-[#242E27] hover:text-[#F3F4F1]'}`}
+                  >
+                    {item.title}
+                    <span className="ml-2 opacity-70">
+                      {item.value === 'ALL'
+                        ? currentTeamSquad.length
+                        : currentTeamSquad.filter((p) => p.player.role === item.value).length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg border border-[#2A312D] bg-[#0B0F0D] px-3 xl:w-56 xl:shrink-0">
+                <Search className="h-4 w-4 shrink-0 text-[#9CA6A0]" aria-hidden="true" />
+                <span className="sr-only">Search squad players</span>
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search a player…"
+                  className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-[#C9A227]"
+                />
+              </label>
             </div>
-          ) : (
-            <div className="space-y-8">
-              <SquadRoleSection title="BATTERS" players={currentTeamSquad} roleFilter={['BATSMAN']} />
-              <SquadRoleSection title="ALL-ROUNDERS" players={currentTeamSquad} roleFilter={['ALL_ROUNDER']} />
-              <SquadRoleSection title="KEEPERS" players={currentTeamSquad} roleFilter={['WICKET_KEEPER']} />
-              <SquadRoleSection title="BOWLERS" players={currentTeamSquad} roleFilter={['BOWLER']} />
-            </div>
-          )}
-        </div>
 
-      </main>
-    </div>
+            {!currentTeamSquad.length ? (
+              <div className="rounded-2xl border border-dashed border-[#2A312D] px-5 py-10 text-center">
+                <Users className="mx-auto mb-3 h-8 w-8 text-[#C9A227]" aria-hidden="true" />
+                <h3 className="text-xl font-semibold uppercase">A squad in the making</h3>
+                <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[#9CA6A0]">
+                  No signings yet. Players acquired at the auction will appear here, grouped by
+                  role.
+                </p>
+              </div>
+            ) : !filteredPlayers.some((p) => role === 'ALL' || p.player.role === role) ? (
+              <div className="rounded-2xl border border-dashed border-[#2A312D] p-6 text-center">
+                <p className="text-sm text-[#9CA6A0]">No players match your filters.</p>
+                <button
+                  onClick={() => {
+                    setSearch('');
+                    setRole('ALL');
+                  }}
+                  className="mt-2 min-h-11 px-4 text-sm font-semibold text-[#E4B93F]"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {roles
+                  .filter((item) => role === 'ALL' || role === item.value)
+                  .map((item) => (
+                    <SquadRoleSection
+                      key={item.value}
+                      title={item.title}
+                      players={filteredPlayers}
+                      roleFilter={[item.value]}
+                    />
+                  ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </AuctionReportLayout>
   );
 }

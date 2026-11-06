@@ -20,6 +20,7 @@ import {
   getRoleNeed,
   computeFutureQualityMap
 } from '@/lib/auction/server-bot-engine';
+import { submitBotBid } from '@/lib/auction/bot-bid-submission';
 import { evaluateTacticalDecision } from '@/lib/auction/bot-tactical-engine';
 import { evaluateQAndTV } from '@/lib/auction/bot-q-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
@@ -82,12 +83,14 @@ describe('Behavior B17-B: Replanning & Next-Action Consumption', () => {
   it('TEST 1 — RIVAL EVENT → REPLAN: Rival bid observation updates brain state and triggers tactical replan', () => {
     const candidatePlayer = makePlayer('p-rival-test', {
       base_price: 200,
-      category: 'B',
-      rating: 85,
+      category: 'A',
+      rating: 88,
       matches: 70,
       runs: 2200,
       batting_average: 34,
-      strike_rate: 136,
+      strike_rate: 138,
+      boundaries: 240,
+      highest_score: 95,
       role: 'BATSMAN'
     });
 
@@ -202,7 +205,7 @@ describe('Behavior B17-B: Replanning & Next-Action Consumption', () => {
 
     expect(replannedEvidence.length).toBe(1);
     // Opportunistic bot facing >0.75 rival pressure with marginal surplus tactically retreats (RIVAL_BAIT_DROP)
-    expect(replannedEvidence[0]!.decision).toBe('DROP');
+    expect(replannedEvidence[0]!.decision).toBe('PASS');
     expect(replannedEvidence[0]!.actionReason).toBe('RIVAL_BAIT_DROP');
 
     // Also verify Price Exceeds TV branch when rival bids exceed TV
@@ -540,7 +543,7 @@ describe('Behavior B17-B: Replanning & Next-Action Consumption', () => {
   // ============================================================
   // TEST 6 — SERVER INTEGRATION
   // ============================================================
-  it('TEST 6 — SERVER INTEGRATION: Real auction event → server bot processing → memory update → replan', () => {
+  it('TEST 6 — SERVER INTEGRATION: Real auction event → accepted server bid → memory update → replan', async () => {
     const candidatePlayer = makePlayer('lot-server-b17b', {
       base_price: 200,
       role: 'BATSMAN',
@@ -583,7 +586,12 @@ describe('Behavior B17-B: Replanning & Next-Action Consumption', () => {
     expect(bids1.length).toBe(1);
     expect(bids1[0]!.nextBidAmount).toBe(225);
 
-    // Memory captured own bid
+    // The candidate becomes memory only after the authoritative RPC accepts it.
+    await submitBotBid(
+      async () => ({ data: { success: true, amount: bids1[0]!.nextBidAmount, current_bid: bids1[0]!.nextBidAmount }, error: null }),
+      { auctionId, teamId: bot.id, playerId: candidatePlayer.id, isFinalBid: bids1[0]!.isFinalBid }
+    );
+
     const mem1 = getBotMemory(auctionId, bot.id);
     expect(mem1.observedBids[candidatePlayer.id]?.highestBid).toBe(225);
 

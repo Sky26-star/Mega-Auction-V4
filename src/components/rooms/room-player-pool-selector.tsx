@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useId, useRef } from 'react';
 import { getPlayersBySetId } from '@/lib/player-sets';
 import { Player } from '@/lib/types/player-set';
-import { Loader2, Users, Filter, Check, X, Search } from 'lucide-react';
+import { Loader2, Check, Search, ChevronDown } from 'lucide-react';
 
 interface Props {
   playerSetId: string;
@@ -10,9 +10,158 @@ interface Props {
 
 type Mode = 'ALL' | 'BY_CATEGORY' | 'BY_ROLE' | 'MANUAL';
 
+interface ThemedSelectOption {
+  value: string;
+  label: string;
+}
+
+interface ThemedSelectProps {
+  value: string;
+  options: ThemedSelectOption[];
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  testId: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+function ThemedSelect({ value, options, onChange, ariaLabel, testId, disabled, className = '' }: ThemedSelectProps) {
+  const listboxId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const selectedIndex = options.findIndex(option => option.value === value);
+
+  useEffect(() => {
+    if (!isOpen || activeIndex < 0) return;
+    document.getElementById(`${listboxId}-option-${activeIndex}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, isOpen, listboxId]);
+
+  const openList = () => {
+    setActiveIndex(Math.max(0, selectedIndex));
+    setIsOpen(true);
+  };
+
+  const selectOption = (option: ThemedSelectOption) => {
+    onChange(option.value);
+    setIsOpen(false);
+    buttonRef.current?.focus();
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!isOpen) {
+        openList();
+        return;
+      }
+      if (!options.length) return;
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const start = activeIndex < 0 ? (step > 0 ? -1 : 0) : activeIndex;
+      setActiveIndex((start + step + options.length) % options.length);
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && !isOpen) {
+      event.preventDefault();
+      openList();
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && isOpen) {
+      event.preventDefault();
+      if (options[activeIndex]) selectOption(options[activeIndex]);
+      return;
+    }
+    if (event.key === 'Home' && isOpen && options.length) {
+      event.preventDefault();
+      setActiveIndex(0);
+      return;
+    }
+    if (event.key === 'End' && isOpen && options.length) {
+      event.preventDefault();
+      setActiveIndex(options.length - 1);
+      return;
+    }
+    if (event.key === 'Escape' && isOpen) {
+      event.preventDefault();
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      className={`relative ${className}`}
+      onBlur={event => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) setIsOpen(false);
+      }}
+    >
+      <button
+        ref={buttonRef}
+        type="button"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={listboxId}
+        aria-activedescendant={isOpen && activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+        data-testid={testId}
+        disabled={disabled}
+        onClick={() => isOpen ? setIsOpen(false) : openList()}
+        onKeyDown={handleKeyDown}
+        className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm ${
+          isOpen
+            ? 'border-[#C9A227]/70 bg-[#101512] text-[#F3F4F1] shadow-lg shadow-black/25'
+            : 'border-[#2A312D] bg-[#0B0F0D] text-[#D0D6D1] hover:border-[#59645D] hover:text-[#F3F4F1]'
+        }`}
+      >
+        <span className="min-w-0 truncate">{options.find(option => option.value === value)?.label ?? ''}</span>
+        <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-[#C9A227] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <div className="absolute right-0 z-40 mt-2 min-w-full overflow-hidden rounded-xl border border-[#3A423D] bg-[#111613] shadow-xl shadow-black/35">
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-label={ariaLabel}
+            className="max-h-64 overflow-y-auto p-1.5 [scrollbar-color:#59645D_#111613] [scrollbar-width:thin]"
+          >
+            {options.map((option, index) => {
+              const isSelected = option.value === value;
+              const isActive = index === activeIndex;
+              return (
+                <div
+                  key={option.value}
+                  id={`${listboxId}-option-${index}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseDown={event => event.preventDefault()}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => selectOption(option)}
+                  className={`cursor-pointer whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+                    isSelected
+                      ? 'bg-[#C9A227]/10 text-[#E4B93F]'
+                      : isActive
+                        ? 'bg-[#202722] text-[#F3F4F1]'
+                        : 'text-[#D0D6D1] hover:bg-[#1A211D] hover:text-[#F3F4F1]'
+                  }`}
+                >
+                  {option.label}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RoomPlayerPoolSelector({ playerSetId, onChange }: Props) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(false);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const [mode, setMode] = useState<Mode>('ALL');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -36,7 +185,7 @@ export function RoomPlayerPoolSelector({ playerSetId, onChange }: Props) {
           // Always reset to ALL mode and ALL limit when player set changes
           setMode('ALL');
           setLimit('ALL');
-          onChange(data.map(p => p.id));
+          onChangeRef.current(data.map(p => p.id));
         }
       } catch (err) {
         console.error(err);
@@ -143,11 +292,11 @@ export function RoomPlayerPoolSelector({ playerSetId, onChange }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => handleModeChange('ALL')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${mode === 'ALL' ? 'bg-[#181E1A] text-[#E4B93F] border-[#C9A227]/40' : 'bg-[#0B0F0D] text-[#9CA6A0] border-[#2A312D] hover:text-[#F3F4F1]'}`}>FULL SET ({players.length})</button>
-        <button type="button" onClick={() => handleModeChange('BY_CATEGORY')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${mode === 'BY_CATEGORY' ? 'bg-[#181E1A] text-[#E4B93F] border-[#C9A227]/40' : 'bg-[#0B0F0D] text-[#9CA6A0] border-[#2A312D] hover:text-[#F3F4F1]'}`}>BY CATEGORY</button>
-        <button type="button" onClick={() => handleModeChange('BY_ROLE')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${mode === 'BY_ROLE' ? 'bg-[#181E1A] text-[#E4B93F] border-[#C9A227]/40' : 'bg-[#0B0F0D] text-[#9CA6A0] border-[#2A312D] hover:text-[#F3F4F1]'}`}>BY ROLE</button>
-        <button type="button" onClick={() => handleModeChange('MANUAL')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${mode === 'MANUAL' ? 'bg-[#181E1A] text-[#E4B93F] border-[#C9A227]/40' : 'bg-[#0B0F0D] text-[#9CA6A0] border-[#2A312D] hover:text-[#F3F4F1]'}`}>MANUAL SELECT</button>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Player pool selection mode">
+        <button type="button" aria-pressed={mode === 'ALL'} onClick={() => handleModeChange('ALL')} className={`rounded-xl border px-4 py-2.5 text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${mode === 'ALL' ? 'border-[#C9A227]/60 bg-[#1A211D] text-[#E4B93F] shadow-sm shadow-black/20' : 'border-[#2A312D] bg-[#0B0F0D] text-[#9CA6A0] hover:border-[#59645D] hover:text-[#F3F4F1]'}`}>FULL SET ({players.length})</button>
+        <button type="button" aria-pressed={mode === 'BY_CATEGORY'} onClick={() => handleModeChange('BY_CATEGORY')} className={`rounded-xl border px-4 py-2.5 text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${mode === 'BY_CATEGORY' ? 'border-[#C9A227]/60 bg-[#1A211D] text-[#E4B93F] shadow-sm shadow-black/20' : 'border-[#2A312D] bg-[#0B0F0D] text-[#9CA6A0] hover:border-[#59645D] hover:text-[#F3F4F1]'}`}>BY CATEGORY</button>
+        <button type="button" aria-pressed={mode === 'BY_ROLE'} onClick={() => handleModeChange('BY_ROLE')} className={`rounded-xl border px-4 py-2.5 text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${mode === 'BY_ROLE' ? 'border-[#C9A227]/60 bg-[#1A211D] text-[#E4B93F] shadow-sm shadow-black/20' : 'border-[#2A312D] bg-[#0B0F0D] text-[#9CA6A0] hover:border-[#59645D] hover:text-[#F3F4F1]'}`}>BY ROLE</button>
+        <button type="button" aria-pressed={mode === 'MANUAL'} onClick={() => handleModeChange('MANUAL')} className={`rounded-xl border px-4 py-2.5 text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${mode === 'MANUAL' ? 'border-[#C9A227]/60 bg-[#1A211D] text-[#E4B93F] shadow-sm shadow-black/20' : 'border-[#2A312D] bg-[#0B0F0D] text-[#9CA6A0] hover:border-[#59645D] hover:text-[#F3F4F1]'}`}>MANUAL SELECT</button>
       </div>
 
       {loading ? (
@@ -156,39 +305,38 @@ export function RoomPlayerPoolSelector({ playerSetId, onChange }: Props) {
           <span>Loading player pool...</span>
         </div>
       ) : (
-        <div className="p-4 rounded-xl bg-[#0B0F0D] border border-[#2A312D]">
+        <div className="rounded-xl border border-[#2A312D] bg-[#0B0F0D] p-4 shadow-inner shadow-black/20">
           {mode !== 'MANUAL' && (
-            <div className="mb-4 flex items-center justify-between bg-[#141917] p-3 rounded-lg border border-[#2A312D]">
-              <span className="text-sm font-semibold text-[#9CA6A0]">Select Player Count</span>
-              <select
-                data-testid="pool-count"
-                value={limit === 'ALL' ? 'ALL' : limit}
-                onChange={(e) => handleLimitChange(e.target.value)}
-                className="bg-[#0B0F0D] border border-[#2A312D] text-[#F3F4F1] text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-[#C9A227]"
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#2A312D] bg-[#141917] p-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#B4BDB7] sm:text-sm">Select Player Count</span>
+              <ThemedSelect
+                testId="pool-count"
+                ariaLabel="Select Player Count"
+                value={limit === 'ALL' ? 'ALL' : String(limit)}
+                onChange={handleLimitChange}
                 disabled={maxAvailable === 0}
-              >
-                {getCountOptions(maxAvailable).map(n => (
-                  <option key={n} value={n === maxAvailable ? 'ALL' : n}>
-                    {n === maxAvailable ? `ALL (${n})` : n}
-                  </option>
-                ))}
-              </select>
+                className="w-full sm:w-auto sm:min-w-32"
+                options={getCountOptions(maxAvailable).map(n => ({
+                  value: n === maxAvailable ? 'ALL' : String(n),
+                  label: n === maxAvailable ? `ALL (${n})` : String(n),
+                }))}
+              />
             </div>
           )}
 
           {mode === 'BY_CATEGORY' && (
-            <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2.5">
               {categories.map(c => (
-                <button type="button" key={c} onClick={() => toggleCategory(c)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedCategories.includes(c) ? 'bg-[#C9A227]/20 border-[#C9A227]/60 text-[#E4B93F]' : 'bg-[#141917] border-[#2A312D] text-[#9CA6A0]'}`}>
+                <button type="button" key={c} aria-pressed={selectedCategories.includes(c)} onClick={() => toggleCategory(c)} className={`rounded-lg border px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${selectedCategories.includes(c) ? 'border-[#C9A227]/60 bg-[#C9A227]/10 text-[#E4B93F]' : 'border-[#2A312D] bg-[#141917] text-[#9CA6A0] hover:border-[#59645D] hover:text-[#F3F4F1]'}`}>
                   Category {c} ({players.filter(p => p.category === c).length})
                 </button>
               ))}
             </div>
           )}
           {mode === 'BY_ROLE' && (
-            <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2.5">
               {roles.map(r => (
-                <button type="button" key={r} onClick={() => toggleRole(r)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedRoles.includes(r) ? 'bg-[#C9A227]/20 border-[#C9A227]/60 text-[#E4B93F]' : 'bg-[#141917] border-[#2A312D] text-[#9CA6A0]'}`}>
+                <button type="button" key={r} aria-pressed={selectedRoles.includes(r)} onClick={() => toggleRole(r)} className={`rounded-lg border px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${selectedRoles.includes(r) ? 'border-[#C9A227]/60 bg-[#C9A227]/10 text-[#E4B93F]' : 'border-[#2A312D] bg-[#141917] text-[#9CA6A0] hover:border-[#59645D] hover:text-[#F3F4F1]'}`}>
                   {r.replace('_', ' ')} ({players.filter(p => p.role === r).length})
                 </button>
               ))}
@@ -196,45 +344,49 @@ export function RoomPlayerPoolSelector({ playerSetId, onChange }: Props) {
           )}
           {mode === 'MANUAL' && (
             <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1 flex items-center space-x-2 bg-[#141917] border border-[#2A312D] px-3 py-2 rounded-lg">
-                  <Search className="w-4 h-4 text-[#9CA6A0]" />
-                  <input type="text" placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="bg-transparent text-sm text-[#F3F4F1] focus:outline-none w-full" />
+              <div className="flex flex-col gap-2.5 sm:flex-row">
+                <div className="flex flex-1 items-center space-x-2 rounded-lg border border-[#2A312D] bg-[#141917] px-3 py-2.5 transition-colors focus-within:border-[#C9A227]/70 focus-within:ring-2 focus-within:ring-[#C9A227]/20">
+                  <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-[#C9A227]" />
+                  <input type="text" placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-transparent text-sm text-[#F3F4F1] outline-none placeholder:text-[#77817A]" />
                 </div>
-                <select
-                  data-testid="pool-role-filter"
+                <ThemedSelect
+                  testId="pool-role-filter"
+                  ariaLabel="Filter by Role"
                   value={manualRoleFilter}
-                  onChange={(e) => setManualRoleFilter(e.target.value)}
-                  className="bg-[#141917] border border-[#2A312D] text-[#9CA6A0] text-sm rounded-lg px-3 py-2 focus:outline-none"
-                >
-                  <option value="ALL">Filter by Role (All)</option>
-                  {roles.map(r => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}
-                </select>
-                <select
-                  data-testid="pool-category-filter"
+                  onChange={setManualRoleFilter}
+                  className="w-full sm:w-auto sm:min-w-48"
+                  options={[
+                    { value: 'ALL', label: 'Filter by Role (All)' },
+                    ...roles.map(r => ({ value: r, label: r.replace('_', ' ') })),
+                  ]}
+                />
+                <ThemedSelect
+                  testId="pool-category-filter"
+                  ariaLabel="Filter by Category"
                   value={manualCategoryFilter}
-                  onChange={(e) => setManualCategoryFilter(e.target.value)}
-                  className="bg-[#141917] border border-[#2A312D] text-[#9CA6A0] text-sm rounded-lg px-3 py-2 focus:outline-none"
-                >
-                  <option value="ALL">Filter by Category (All)</option>
-                  {categories.map(c => <option key={c} value={c}>Category {c}</option>)}
-                </select>
+                  onChange={setManualCategoryFilter}
+                  className="w-full sm:w-auto sm:min-w-48"
+                  options={[
+                    { value: 'ALL', label: 'Filter by Category (All)' },
+                    ...categories.map(c => ({ value: c, label: `Category ${c}` })),
+                  ]}
+                />
               </div>
-              <div className="max-h-60 overflow-y-auto space-y-1 pr-2">
+              <div className="max-h-60 space-y-1 overflow-y-auto pr-2 [scrollbar-color:#59645D_#0B0F0D] [scrollbar-width:thin]">
                 {filteredManualPlayers.map(p => (
-                  <button type="button" key={p.id} onClick={() => togglePlayer(p.id)} className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-[#181E1A] border border-transparent hover:border-[#2A312D] text-left">
+                  <button type="button" key={p.id} aria-pressed={selectedPlayers.includes(p.id)} onClick={() => togglePlayer(p.id)} className={`flex w-full items-center justify-between rounded-lg border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/60 ${selectedPlayers.includes(p.id) ? 'border-[#C9A227]/40 bg-[#C9A227]/10' : 'border-transparent hover:border-[#2A312D] hover:bg-[#181E1A]'}`}>
                     <div>
-                      <span className={`text-sm ${selectedPlayers.includes(p.id) ? 'text-[#E4B93F] font-bold' : 'text-[#F3F4F1]'}`}>{p.name}</span>
-                      <span className="text-xs text-[#9CA6A0] ml-2">{p.role.replace('_', ' ')} • {p.category}</span>
+                      <span className={`text-sm ${selectedPlayers.includes(p.id) ? 'font-bold text-[#E4B93F]' : 'font-medium text-[#F3F4F1]'}`}>{p.name}</span>
+                      <span className="ml-2 text-xs text-[#9CA6A0]">{p.role.replace('_', ' ')} • {p.category}</span>
                     </div>
-                    {selectedPlayers.includes(p.id) && <Check className="w-4 h-4 text-emerald-400" />}
+                    {selectedPlayers.includes(p.id) && <Check aria-hidden="true" className="h-4 w-4 text-[#E4B93F]" />}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="mt-4 pt-4 border-t border-[#2A312D] flex items-center justify-between text-xs">
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#2A312D] pt-4 text-xs">
             <span className="text-[#9CA6A0] font-semibold uppercase tracking-wider">Active Room Pool Size</span>
             <span className="px-3 py-1 rounded-full bg-[#141917] border border-[#2A312D] text-[#E4B93F] font-bold font-mono-numbers">{poolCount} Players Selected</span>
           </div>

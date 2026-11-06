@@ -2,6 +2,7 @@
 
 // src/components/rooms/auction-info-strip.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import { Database, Coins, Clock, Users, Globe, Cpu } from 'lucide-react';
 
 interface AuctionInfoStripProps {
@@ -63,7 +64,7 @@ export function AuctionInfoStrip({
   return (
     <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-2">
       <div className="rounded-2xl bg-[#141917] border-2 border-[#2A312D] p-3 sm:p-4 shadow-xl">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className={`grid grid-cols-2 sm:grid-cols-3 ${AUCTION_BOTS_ENABLED ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-3`}>
           
           {/* 1. PLAYER POOL */}
           <div className="p-2.5 rounded-xl bg-[#0B0F0D] border border-[#2A312D] flex flex-col justify-between space-y-1">
@@ -131,17 +132,19 @@ export function AuctionInfoStrip({
           </div>
 
           {/* 6. BOT OPPONENTS */}
-          <div className="p-2.5 rounded-xl bg-[#0B0F0D] border border-[#2A312D] flex flex-col justify-between space-y-1">
-            <div className="flex items-center space-x-1.5 text-[#9CA6A0]">
-              <Cpu className="w-3.5 h-3.5 text-[#E4B93F] flex-shrink-0" />
-              <span className="text-[10px] font-extrabold uppercase tracking-wider font-display">BOT OPPONENTS</span>
+          {AUCTION_BOTS_ENABLED && (
+            <div className="p-2.5 rounded-xl bg-[#0B0F0D] border border-[#2A312D] flex flex-col justify-between space-y-1">
+              <div className="flex items-center space-x-1.5 text-[#9CA6A0]">
+                <Cpu className="w-3.5 h-3.5 text-[#E4B93F] flex-shrink-0" />
+                <span className="text-[10px] font-extrabold uppercase tracking-wider font-display">BOT OPPONENTS</span>
+              </div>
+              <div className="text-xs font-black text-[#F3F4F1] font-mono-numbers truncate">
+                <AnimatedAuctionValue valueKey={`${botCount}-${totalManagers}`}>
+                  {botCount} AI BOTS ({totalManagers}/{maxManagers})
+                </AnimatedAuctionValue>
+              </div>
             </div>
-            <div className="text-xs font-black text-[#F3F4F1] font-mono-numbers truncate">
-              <AnimatedAuctionValue valueKey={`${botCount}-${totalManagers}`}>
-                {botCount} AI BOTS ({totalManagers}/{maxManagers})
-              </AnimatedAuctionValue>
-            </div>
-          </div>
+          )}
 
         </div>
       </div>

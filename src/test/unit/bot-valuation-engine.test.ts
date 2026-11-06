@@ -401,7 +401,7 @@ describe('D. Rival Intelligence', () => {
       // Bot should either DROP or SKIP (not aggressively ENTER)
       if (evidence[0]) {
         // The tactical engine may PASS due to RIVAL_BAIT_DROP
-        expect(['DROP', 'SKIP', 'HESITATE']).toContain(evidence[0].decision);
+        expect(['DROP', 'SKIP', 'PASS']).toContain(evidence[0].decision);
       }
     }
   });

@@ -1,7 +1,7 @@
 // src/lib/admin/loader.ts
 // Authoritative Platform Admin Data Loader
 
-import { createClient as createServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { verifyAdminUser } from './auth';
 
 export interface AdminPlatformStats {
@@ -76,7 +76,8 @@ export async function loadAdminDashboardData(): Promise<{
     return { data: null, error: authCheck.error || 'UNAUTHORIZED: Platform admin access required.' };
   }
 
-  const supabase = await createServerClient();
+  // This loader runs only after verifyAdminUser authorizes the mapped identity.
+  const supabase = createAdminClient();
 
   try {
     // 2. Parallel Database Queries for Platform Entities

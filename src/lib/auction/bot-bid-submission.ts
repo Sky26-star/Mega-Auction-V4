@@ -1,4 +1,5 @@
 import { recordBotBidObservation } from './bot-brain-memory';
+import { getAuctionRpcFailure } from './rpc-response';
 
 export interface BotBidSubmissionOptions {
   auctionId: string;
@@ -8,18 +9,16 @@ export interface BotBidSubmissionOptions {
 }
 
 /**
- * Record bid memory only when the RPC confirms an applied bid and reports an
- * accepted amount that is also persisted.
+ * Submit one bot bid and commit its in-memory observation only after the RPC
+ * confirms that the bid was applied with a persisted amount.
  */
 export async function submitBotBid(
   submit: () => PromiseLike<{ data: any; error: any }>,
   options: BotBidSubmissionOptions
 ) {
   const { data, error } = await submit();
-  const rpcSuccess = !error && Boolean(data && data.success === true);
-  const rpcError = error
-    ? error.message
-    : (Boolean(data && data.success === false) ? (data?.error || 'REJECTED') : null);
+  const rpcError = getAuctionRpcFailure(data, error, 'RPC did not return a successful confirmation.');
+  const rpcSuccess = rpcError === null;
 
   let acceptedAmount: number | null = null;
   let persistedAmount: number | null = null;

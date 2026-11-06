@@ -3,6 +3,7 @@ import { V3AuctionLot, V3Player, V3Team } from '@/lib/v3-auction-types';
 import Image from 'next/image';
 
 interface V3ResultAnimationProps {
+  responsive?: boolean;
   animation: {
     status: 'SOLD' | 'UNSOLD';
     lot: V3AuctionLot;
@@ -11,7 +12,7 @@ interface V3ResultAnimationProps {
   teams: V3Team[];
 }
 
-export function V3ResultAnimation({ animation, teams }: V3ResultAnimationProps) {
+export function V3ResultAnimation({ animation, teams, responsive = false }: V3ResultAnimationProps) {
   console.log(`[ TRACE 5 ] ${Date.now()} | V3ResultAnimation render | lot_id: ${animation.lot.id}`);
 
   const { status, lot, player } = animation;
@@ -19,29 +20,29 @@ export function V3ResultAnimation({ animation, teams }: V3ResultAnimationProps) 
   const winningTeam = isSold ? teams.find(t => t.id === lot.winning_team_id) : null;
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center pointer-events-none transition-all duration-500
+    <div className={`fixed inset-0 z-50 flex ${responsive ? 'items-start justify-center overflow-y-auto overscroll-contain p-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] motion-reduce:transition-none sm:items-center sm:p-6' : 'items-center justify-center'} pointer-events-none transition-all duration-500
       opacity-100 backdrop-blur-sm bg-black/60
     `}>
       {/* Container with pop-in scale animation */}
-      <div className={`relative flex flex-col items-center justify-center w-full max-w-4xl p-8 transform transition-transform duration-500 ease-out
+      <div className={`relative flex w-full max-w-4xl flex-col items-center justify-center transform transition-transform duration-500 ease-out ${responsive ? 'pointer-events-auto my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto p-3 motion-reduce:transition-none sm:max-h-[calc(100dvh-3rem)] sm:p-8' : 'p-8'}
         scale-100 translate-y-0
       `}>
 
         {/* The big status text behind everything (large and semi-transparent) */}
-        <div className={`absolute -z-10 font-black tracking-tighter text-[15rem] leading-none select-none opacity-20
+        <div className={`${responsive ? 'pointer-events-none absolute -z-10 select-none text-6xl font-black leading-none tracking-tighter opacity-20 sm:text-8xl lg:text-[15rem]' : 'absolute -z-10 select-none text-[15rem] font-black leading-none tracking-tighter opacity-20'}
           ${isSold ? 'text-[#10B981]' : 'text-[#B8322E]'}
         `}>
           {status}
         </div>
 
         {/* Foreground Content Card */}
-        <div className={`relative flex flex-col items-center justify-center p-12 w-full rounded-[3rem] border-4 overflow-hidden shadow-2xl
+        <div className={`relative flex w-full flex-col items-center justify-center overflow-hidden shadow-2xl ${responsive ? 'rounded-3xl border-2 p-4 sm:rounded-[3rem] sm:border-4 sm:p-8 lg:p-12' : 'rounded-[3rem] border-4 p-12'}
           ${isSold ? 'bg-gradient-to-b from-[#10B981]/10 to-[#0B0F0D] border-[#10B981]/30 shadow-[#10B981]/20'
                    : 'bg-gradient-to-b from-[#B8322E]/10 to-[#0B0F0D] border-[#B8322E]/30 shadow-[#B8322E]/20'}
         `}>
 
           {/* Main Status Text (Foreground) */}
-          <h1 className={`font-display font-black text-6xl md:text-8xl uppercase tracking-wider drop-shadow-lg mb-8
+          <h1 className={`${responsive ? 'mb-5 text-5xl sm:mb-8 sm:text-6xl md:text-8xl' : 'mb-8 text-6xl md:text-8xl'} font-display font-black uppercase tracking-wider drop-shadow-lg
             ${isSold ? 'text-[#10B981]' : 'text-[#B8322E]'}
           `}>
             {status}
@@ -59,7 +60,7 @@ export function V3ResultAnimation({ animation, teams }: V3ResultAnimationProps) 
               </div>
             )}
 
-            <h2 className="font-display font-bold text-3xl md:text-5xl text-[#F3F4F1] text-center">
+            <h2 className={`${responsive ? 'break-words text-center text-2xl sm:text-3xl md:text-5xl' : 'text-center text-3xl md:text-5xl'} font-display font-bold text-[#F3F4F1]`}>
               {player.name}
             </h2>
             <div className="flex space-x-2 text-sm font-mono font-bold text-[#9CA6A0] uppercase tracking-widest">
@@ -71,18 +72,18 @@ export function V3ResultAnimation({ animation, teams }: V3ResultAnimationProps) 
 
           {/* Sold Result Details */}
           {isSold && winningTeam && (
-            <div className="flex flex-col items-center animate-fade-in-up mt-4">
+            <div className={`mt-4 flex flex-col items-center animate-fade-in-up ${responsive ? 'motion-reduce:animate-none' : ''}`}>
               <span className="text-sm font-mono font-bold text-[#9CA6A0] uppercase tracking-widest mb-3">
                 PURCHASED BY
               </span>
 
-              <div className="flex items-center space-x-4 bg-[#0B0F0D] px-8 py-4 rounded-2xl border-2 border-[#10B981]/30">
+              <div className={responsive ? 'flex max-w-full flex-wrap items-center justify-center gap-3 rounded-2xl border-2 border-[#10B981]/30 bg-[#0B0F0D] px-4 py-3 sm:gap-4 sm:px-8 sm:py-4' : 'flex items-center space-x-4 rounded-2xl border-2 border-[#10B981]/30 bg-[#0B0F0D] px-8 py-4'}>
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center bg-[#C9A227] text-[#141917] font-bold text-sm"
                 >
                   {winningTeam.short_name.substring(0, 2)}
                 </div>
-                <span className="font-display font-bold text-2xl text-[#F3F4F1] uppercase">
+                <span className={`${responsive ? 'break-words text-center text-lg sm:text-2xl' : 'text-2xl'} font-display font-bold uppercase text-[#F3F4F1]`}>
                   {winningTeam.name}
                 </span>
               </div>
@@ -91,7 +92,7 @@ export function V3ResultAnimation({ animation, teams }: V3ResultAnimationProps) 
                 <span className="text-xs font-mono font-bold text-[#9CA6A0] uppercase tracking-widest mb-1">
                   FINAL PRICE
                 </span>
-                <div className="text-5xl font-mono-numbers font-black text-[#E4B93F] drop-shadow-md">
+                <div className={`${responsive ? 'text-4xl sm:text-5xl' : 'text-5xl'} font-mono-numbers font-black text-[#E4B93F] drop-shadow-md`}>
                   ₹{lot.winning_bid} <span className="text-2xl text-[#E4B93F]/70">L</span>
                 </div>
               </div>
@@ -100,7 +101,7 @@ export function V3ResultAnimation({ animation, teams }: V3ResultAnimationProps) 
 
           {/* Unsold Details */}
           {!isSold && (
-            <div className="flex flex-col items-center animate-fade-in-up mt-4">
+            <div className={`mt-4 flex flex-col items-center animate-fade-in-up ${responsive ? 'motion-reduce:animate-none' : ''}`}>
               <div className="px-6 py-3 rounded-xl border border-dashed border-[#B8322E]/50 text-[#B8322E] font-mono text-lg">
                 NO BIDS RECEIVED
               </div>

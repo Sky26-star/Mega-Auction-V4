@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 // src/test/e2e/phase17-results-history.spec.ts
 // E2E Verification Suite for Phase 17F (Results & History UI/UX) and Phase 17G (Data Integrity)
 // Uses existing disposable user and auction fixtures.
@@ -31,8 +32,8 @@ test.describe.serial('Phase 17F + 17G — Post-Auction Results, History & Modal 
     runId = hostUser.runId;
 
     supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+      process.env.SUPABASE_TEST_URL!,
+      process.env.SUPABASE_TEST_SERVICE_ROLE_KEY!
     );
 
     // 2. Provision standard disposable auction

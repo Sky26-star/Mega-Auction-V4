@@ -4,6 +4,7 @@
 // Player Set Create/Edit Modal for Mega Auction V2
 
 import React, { useState, useEffect } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import type { PlayerSet, PlayerSetFormInput } from '@/lib/types/player-set';
 import { playerSetSchema } from '@/lib/validations/player-set';
 import { X, Database, Globe, Lock, Loader2, AlertCircle } from 'lucide-react';
@@ -79,25 +80,29 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in font-sans">
-      <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+    <Dialog.Root open={isOpen} onOpenChange={open => { if (!open && !isLoading) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm" />
+        <Dialog.Content onEscapeKeyDown={e => { if (isLoading) e.preventDefault(); }} onPointerDownOutside={e => { if (isLoading) e.preventDefault(); }} className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[#39443B] bg-[#141917] text-[#F3F4F1] shadow-2xl">
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between">
+        <div className="px-6 py-5 border-b border-[#2A312D] flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
-            <div className="w-9 h-9 rounded-xl bg-violet-600/20 text-violet-400 border border-violet-500/30 flex items-center justify-center shadow-inner">
+            <div className="w-9 h-9 rounded-xl bg-[#C9A227]/10 text-[#E4B93F] border border-[#C9A227]/30 flex items-center justify-center shadow-inner">
               <Database className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">
+              <Dialog.Title className="text-xl font-semibold text-[#F3F4F1]">
                 {initialData ? 'Edit Player Set' : 'Create Player Set'}
-              </h2>
-              <p className="text-xs text-slate-400">Configure custom auction player pool database</p>
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-sm text-[#9CA6A0]">Name your pool and choose who can use it.</Dialog.Description>
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close player set dialog"
             onClick={onClose}
             disabled={isLoading}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-[#9CA6A0] hover:text-white hover:bg-[#242E27] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -113,7 +118,7 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
           )}
 
           <div>
-            <label htmlFor="set-name" className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+            <label htmlFor="set-name" className="block text-xs font-bold text-[#BBC3BD] uppercase tracking-wider mb-2">
               Player Set Name *
             </label>
             <input
@@ -123,7 +128,7 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. IPL 2026 Mega Auction Pool"
               disabled={isLoading}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-800/60 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 text-xs transition-all"
+              className="w-full min-h-12 px-4 py-3 rounded-xl bg-[#0B0F0D] border border-[#39443B] text-white placeholder-[#9CA6A0] focus:outline-none focus:ring-2 focus:ring-[#C9A227] text-sm transition-all"
             />
             {fieldErrors.name && (
               <p className="mt-1.5 text-xs text-red-400">{fieldErrors.name}</p>
@@ -131,7 +136,7 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
           </div>
 
           <div>
-            <label htmlFor="set-desc" className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+            <label htmlFor="set-desc" className="block text-xs font-bold text-[#BBC3BD] uppercase tracking-wider mb-2">
               Description (Optional)
             </label>
             <textarea
@@ -141,7 +146,7 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Brief overview of marquee stars, international caps, or pool rules"
               disabled={isLoading}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-800/60 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 text-xs transition-all resize-none"
+              className="w-full min-h-12 px-4 py-3 rounded-xl bg-[#0B0F0D] border border-[#39443B] text-white placeholder-[#9CA6A0] focus:outline-none focus:ring-2 focus:ring-[#C9A227] text-sm transition-all resize-none"
             />
             {fieldErrors.description && (
               <p className="mt-1.5 text-xs text-red-400">{fieldErrors.description}</p>
@@ -149,49 +154,49 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
           </div>
 
           {/* Visibility Toggle */}
-          <div
-            className="p-4 rounded-2xl bg-slate-800/40 border border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-800/60 transition-colors"
-            onClick={() => setIsPublic(!isPublic)}
+          <label
+            className="p-4 rounded-xl bg-[#0B0F0D] border border-[#2A312D] flex items-center justify-between cursor-pointer hover:bg-[#0B0F0D] transition-colors"
           >
             <div className="flex items-center space-x-3">
               <div
                 className={`w-9 h-9 rounded-xl flex items-center justify-center ${
                   isPublic
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    : 'bg-[#242E27] text-[#9CA6A0] border border-[#39443B]'
                 }`}
               >
                 {isPublic ? <Globe className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
               </div>
               <div>
                 <span className="block text-xs font-bold text-white">Public Player Pool</span>
-                <span className="block text-[11px] text-slate-400">
+                <span className="block text-[11px] text-[#9CA6A0]">
                   Allow all auction room hosts to select this set
                 </span>
               </div>
             </div>
             <input
               type="checkbox"
+              disabled={isLoading}
               checked={isPublic}
               onChange={(e) => setIsPublic(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-violet-600 focus:ring-violet-500 cursor-pointer"
+              className="w-4 h-4 rounded border-[#39443B] bg-[#141917] accent-[#C9A227] focus:ring-[#C9A227] cursor-pointer"
             />
-          </div>
+          </label>
 
           {/* Actions */}
-          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-800">
+          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-[#2A312D]">
             <button
               type="button"
               onClick={onClose}
               disabled={isLoading}
-              className="px-4 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold hover:bg-slate-800 transition-colors"
+              className="min-h-12 px-4 py-3 rounded-xl border border-[#39443B] text-[#BBC3BD] text-xs font-semibold hover:bg-[#242E27] transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-lg shadow-violet-600/30 flex items-center space-x-2 transition-colors disabled:opacity-50"
+              className="min-h-12 px-5 py-3 rounded-xl bg-[#C9A227] hover:bg-[#E4B93F] text-[#0B0F0D] text-xs font-semibold  flex items-center space-x-2 transition-colors disabled:opacity-50"
             >
               {isLoading ? (
                 <>
@@ -204,7 +209,8 @@ export function PlayerSetModal({ isOpen, onClose, onSubmit, initialData }: Playe
             </button>
           </div>
         </form>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

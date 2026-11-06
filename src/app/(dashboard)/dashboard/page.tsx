@@ -1,9 +1,11 @@
 import React from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@/lib/auth/server-session';
 import { createClient } from '@/lib/supabase/server';
 import { Navbar } from '@/components/layout/navbar';
+import { getCurrentMappedProfile } from '@/lib/auth/server-profile';
+import { verifyAdminUser } from '@/lib/admin/auth';
 
 import {
   Gavel,
@@ -26,33 +28,33 @@ export const metadata = {
 
 export default async function DashboardPage() {
   // ------------------------------------------------------------
-  // Clerk is the authoritative authentication provider.
+  // Supabase Auth is the authoritative authentication provider.
   // ------------------------------------------------------------
   const { userId } = await auth();
 
-  // No authenticated Clerk session → login.
+  // No authenticated Supabase Auth session → login.
   if (!userId) {
-    redirect('/login');
+    redirect('/sign-in');
   }
 
   // ------------------------------------------------------------
-  // Current Clerk user
+  // Current Supabase Auth user
   // ------------------------------------------------------------
-  const clerkUser = await currentUser();
-
   // ------------------------------------------------------------
   // Supabase is used for application data only.
   // ------------------------------------------------------------
-  const supabase = await createClient();
+  const [nativeUser, supabase, profile, adminResult] = await Promise.all([
+    currentUser(),
+    createClient(),
+    getCurrentMappedProfile(),
+    verifyAdminUser(),
+  ]);
 
   // ------------------------------------------------------------
   // Fetch User Profile
   // ------------------------------------------------------------
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
+  if (!profile) redirect('/auth/complete');
+  const { authorized: isAdmin } = adminResult;
 
   // ------------------------------------------------------------
   // Fetch User's Recent Rooms
@@ -61,7 +63,7 @@ export default async function DashboardPage() {
   const { data: participantData } = await supabase
     .from('room_participants')
     .select('room_id')
-    .eq('user_id', userId);
+    .eq('user_id', profile.id);
 
   const roomIds = (participantData || []).map(
     (p: { room_id: string }) => p.room_id
@@ -74,12 +76,6 @@ export default async function DashboardPage() {
     .from('rooms')
     .select(`
       *,
-      host_profile:profiles!rooms_host_id_fkey(
-        id,
-        username,
-        display_name,
-        avatar_url
-      ),
       auctions(
         id,
         status,
@@ -92,15 +88,22 @@ export default async function DashboardPage() {
 
   if (roomIds.length > 0) {
     roomsQuery = roomsQuery.or(
-      `host_id.eq.${userId},id.in.(${roomIds.join(',')})`
+      `host_id.eq.${profile.id},id.in.(${roomIds.join(',')})`
     );
   } else {
-    roomsQuery = roomsQuery.eq('host_id', userId);
+    roomsQuery = roomsQuery.eq('host_id', profile.id);
   }
 
   const { data: roomRows } = await roomsQuery;
-
-  const recentRooms = roomRows || [];
+  const roomProfileIds = [...new Set((roomRows || []).map(room => room.id).filter(Boolean))];
+  const { data: roomProfiles } = roomProfileIds.length
+    ? await supabase.rpc('get_room_public_profiles', { p_room_ids: roomProfileIds })
+    : { data: [] };
+  const hostProfileMap = new Map((roomProfiles || []).map((profile: any) => [`${profile.room_id}:${profile.id}`, profile]));
+  const recentRooms = (roomRows || []).map(room => ({
+    ...room,
+    host_profile: hostProfileMap.get(`${room.id}:${room.host_id}`) || null,
+  }));
 
   // ------------------------------------------------------------
   // Activity metrics
@@ -126,12 +129,12 @@ export default async function DashboardPage() {
   const displayName =
     profile?.display_name ||
     profile?.username ||
-    clerkUser?.firstName ||
-    clerkUser?.username ||
+    nativeUser?.user_metadata?.display_name ||
+    nativeUser?.user_metadata?.full_name ||
     'Franchise Owner';
 
   const email =
-    clerkUser?.primaryEmailAddress?.emailAddress ||
+    nativeUser?.email ||
     'N/A';
 
   return (
@@ -170,7 +173,7 @@ export default async function DashboardPage() {
                 👋
               </span>
 
-              {profile?.is_admin && (
+              {isAdmin && (
                 <Link
                   href="/admin"
                   className="px-2.5 py-0.5 rounded-full bg-[#C9A227]/15 text-[#E4B93F] border border-[#C9A227]/40 text-[10px] font-extrabold uppercase font-mono-numbers flex items-center gap-1 hover:bg-[#C9A227]/30 transition-all shadow-md"

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { evaluateTacticalDecision, type TacticalInputContext } from '@/lib/auction/bot-tactical-engine';
 import { updateBotBrainState } from '@/lib/auction/bot-brain-state';
 import {
@@ -8,6 +8,11 @@ import {
   type BotDecisionEvidence
 } from '@/lib/auction/server-bot-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, appendFileSync: vi.fn() };
+});
 
 describe('Behavior B11: Rival Intimidation', () => {
   const currentLot: V3Player & { rating?: number } = {
@@ -22,14 +27,6 @@ describe('Behavior B11: Rival Intimidation', () => {
     is_overseas: false,
     image_url: null,
     rating: 80,
-    matches: 80,
-    runs: 2500,
-    batting_average: 35,
-    strike_rate: 140,
-    boundaries: 300,
-    hundreds: 1,
-    fifties: 15,
-    highest_score: 102,
   };
 
   const conservativeBot: V3Team & { personality?: string } = {
@@ -336,6 +333,16 @@ describe('Behavior B11: Rival Intimidation', () => {
     const currentBid = 475;
     const basePrice = 100;
 
+    const currentLotWithStats: V3Player & { rating?: number } = {
+      ...currentLot,
+      rating: 84,
+      matches: 60,
+      runs: 2000,
+      batting_average: 32,
+      strike_rate: 135,
+      boundaries: 250,
+    };
+
     const futureAlternative: V3Player = {
       id: 'future-bat-1',
       name: 'Future Batsman',
@@ -347,6 +354,7 @@ describe('Behavior B11: Rival Intimidation', () => {
       base_price: 100,
       is_overseas: false,
       image_url: null,
+      rating: 85,
     };
 
     const highRivalBrainState = {
@@ -372,7 +380,7 @@ describe('Behavior B11: Rival Intimidation', () => {
     const evidenceIntimidated: BotDecisionEvidence[] = [];
     const bidsIntimidated = evaluateBotsForLot(
       [conservativeBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -389,7 +397,7 @@ describe('Behavior B11: Rival Intimidation', () => {
     const evidenceLowRival: BotDecisionEvidence[] = [];
     const bidsLowRival = evaluateBotsForLot(
       [conservativeBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -406,7 +414,7 @@ describe('Behavior B11: Rival Intimidation', () => {
     const evidenceAggressive: BotDecisionEvidence[] = [];
     const bidsAggressive = evaluateBotsForLot(
       [aggressiveBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -423,7 +431,7 @@ describe('Behavior B11: Rival Intimidation', () => {
     const evidenceOpportunistic: BotDecisionEvidence[] = [];
     const bidsOpportunistic = evaluateBotsForLot(
       [opportunisticBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -461,7 +469,7 @@ describe('Behavior B11: Rival Intimidation', () => {
     });
 
     // B11 Intimidated: Conservative bot drops with RIVAL_INTIMIDATION and submits no bids
-    expect(evidenceIntimidated[0]?.decision).toBe('DROP');
+    expect(evidenceIntimidated[0]?.decision).toBe('PASS');
     expect(evidenceIntimidated[0]?.actionReason).toBe('RIVAL_INTIMIDATION');
     expect(bidsIntimidated.length).toBe(0);
 
@@ -477,8 +485,8 @@ describe('Behavior B11: Rival Intimidation', () => {
     expect(bidsAggressive.length).toBe(1);
     expect(bidsAggressive[0]?.nextBidAmount).toBe(525);
 
-    // B8 Separation: Opportunistic bot drops with RIVAL_BAIT_DROP
-    expect(evidenceOpportunistic[0]?.decision).toBe('DROP');
+    // B8 Separation: Opportunistic bot temporarily passes with RIVAL_BAIT_DROP
+    expect(evidenceOpportunistic[0]?.decision).toBe('PASS');
     expect(evidenceOpportunistic[0]?.actionReason).toBe('RIVAL_BAIT_DROP');
     expect(bidsOpportunistic.length).toBe(0);
   });

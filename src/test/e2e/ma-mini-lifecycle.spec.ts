@@ -1,26 +1,66 @@
+import './setup/e2e-target-guard';
 import { test, expect, Page } from '@playwright/test';
 import crypto from 'crypto';
+import { loadEnvConfig } from '@next/env';
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import {
   createDisposableTestUser,
   setupDisposableAuction,
   cleanupDisposableAuction,
 } from './setup/auction-fixture';
 
+loadEnvConfig(process.cwd());
+
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  process.env.SUPABASE_TEST_URL!,
+  process.env.SUPABASE_TEST_SERVICE_ROLE_KEY!
 );
 
-// Helper: authenticate test user in Playwright page
+async function createSupabaseBrowserTestUser() {
+  const result = await createDisposableTestUser();
+  return { ...result, email: result.user.email!, profileId: result.user.id };
+}
+
+async function loginSupabaseTestUser(page: Page, testUser: any) {
+  // Auction fixtures use an existing disposable native session, not the retired
+  // password UI. This is not a Google/GitHub provider end-to-end test.
+  const { data: { session } } = await testUser.supabase.auth.getSession();
+  if (!session) throw new Error('Disposable fixture has no native session.');
+  const cookieValues: { name: string; value: string }[] = [];
+  const client = createServerClient(process.env.SUPABASE_TEST_URL!, process.env.SUPABASE_TEST_ANON_KEY!, {
+    cookies: { getAll: () => [], setAll: values => { cookieValues.push(...values); } },
+  });
+  const { error } = await client.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+  if (error) throw new Error('Disposable native session verification failed.');
+  await page.context().addCookies(cookieValues.map(cookie => ({ ...cookie, url: 'http://localhost:3000', sameSite: 'Lax' as const })));
+  await page.goto('/dashboard');
+  await page.waitForURL('**/dashboard*', { timeout: 30000 });
+  const response = await page.request.get('/api/auth/me');
+  const result = await response.json();
+  if (!response.ok() || result.profile?.id !== testUser.user.id) throw new Error('Native browser identity verification failed.');
+  return testUser;
+}
+
+async function cleanupSupabaseBrowserTestUser(testUser: any) {
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(testUser.user.id);
+  if (error && !error.message.toLowerCase().includes('not found')) throw error;
+}
+
 async function loginAndNavigate(page: Page, testUser: any, targetPath: string) {
-  await page.goto('/login');
-  await page.fill('input[id="login-email"]', testUser.user.email);
-  await page.fill('input[id="login-password"]', `Pass_${testUser.runId}!`);
-  await page.click('button[type="submit"]');
-  await page.waitForURL('**/dashboard*', { timeout: 15000 });
+  await loginSupabaseTestUser(page, { ...testUser, email: testUser.user.email });
   await page.goto(targetPath);
   await page.waitForLoadState('domcontentloaded');
+}
+
+async function nativeBrowserAccessToken(page: Page) {
+  const cookies = (await page.context().cookies())
+    .filter(cookie => /^sb-.+-auth-token(?:\.\d+)?$/.test(cookie.name))
+    .sort((a, b) => Number(a.name.split('.').at(-1) || 0) - Number(b.name.split('.').at(-1) || 0));
+  const encoded = decodeURIComponent(cookies.map(cookie => cookie.value).join(''));
+  const session = JSON.parse(encoded.startsWith('base64-') ? Buffer.from(encoded.slice(7), 'base64url').toString('utf8') : encoded);
+  if (!session.access_token) throw new Error('Native browser session cookie is missing.');
+  return session.access_token as string;
 }
 
 // Helper: Seed F1 (Completed Main Auction, no Mini session)
@@ -34,73 +74,85 @@ async function setupF1CompletedAuction(hostUser: any, runId: string) {
   });
 
   const { roomId, auctionId, hostTeamId, roomCode } = auctionSetup;
-
-  // Query 2 existing players
-  const { data: players } = await supabaseAdmin
+  const { data: players, error: playersError } = await supabaseAdmin
     .from('players')
     .select('id, name, role, category, country, base_price, is_overseas')
     .limit(2);
 
-  if (!players || players.length < 2) {
-    throw new Error('Database must have at least 2 players in players table for fixtures');
+  if (playersError || !players || players.length < 2) {
+    throw new Error(`Database must have at least 2 players in players table for fixtures: ${playersError?.message || 'not enough players'}`);
   }
 
   const p1 = players[0]!;
   const p2 = players[1]!;
+  const { data: lot1, error: lot1LookupError } = await supabaseAdmin
+    .from('auction_lots')
+    .select('id')
+    .eq('auction_id', auctionId)
+    .eq('player_id', p1.id)
+    .eq('is_mini_round', false)
+    .single();
+  if (lot1LookupError || !lot1) throw new Error(`Could not find seeded lot for the sold test player: ${lot1LookupError?.message || 'missing lot'}`);
 
-  const lot1Id = crypto.randomUUID();
-  const lot2Id = crypto.randomUUID();
+  const { data: lot2, error: lot2LookupError } = await supabaseAdmin
+    .from('auction_lots')
+    .select('id')
+    .eq('auction_id', auctionId)
+    .eq('player_id', p2.id)
+    .eq('is_mini_round', false)
+    .single();
+  if (lot2LookupError || !lot2) throw new Error(`Could not find seeded lot for the unsold test player: ${lot2LookupError?.message || 'missing lot'}`);
 
-  // Insert Lot 1: SOLD
-  await supabaseAdmin.from('auction_lots').insert({
-    id: lot1Id,
-    auction_id: auctionId,
-    player_id: p1.id,
-    lot_index: 1,
-    status: 'SOLD',
-    base_price: p1.base_price,
-    current_bid: p1.base_price + 50,
-    winning_bid: p1.base_price + 50,
-    winning_team_id: hostTeamId,
-    is_mini_round: false,
-  });
+  const soldPrice = p1.base_price + 50;
+  const { error: soldLotError } = await supabaseAdmin
+    .from('auction_lots')
+    .update({
+      status: 'SOLD',
+      current_bid: soldPrice,
+      winning_bid: soldPrice,
+      winning_team_id: hostTeamId,
+      highest_bidder_team_id: hostTeamId,
+      timer_expires_at: null,
+      get_ready_expires_at: null,
+    })
+    .eq('id', lot1.id);
+  expect(soldLotError).toBeNull();
 
-  await supabaseAdmin.from('squad_players').insert({
+  const { error: squadPlayerError } = await supabaseAdmin.from('squad_players').insert({
     id: crypto.randomUUID(),
     auction_id: auctionId,
     team_id: hostTeamId,
     player_id: p1.id,
-    lot_id: lot1Id,
-    purchase_price: p1.base_price + 50,
-    is_active: true,
+    lot_id: lot1.id,
+    purchase_price: soldPrice,
   });
+  expect(squadPlayerError).toBeNull();
 
-  // Insert Lot 2: UNSOLD
-  await supabaseAdmin.from('auction_lots').insert({
-    id: lot2Id,
-    auction_id: auctionId,
-    player_id: p2.id,
-    lot_index: 2,
-    status: 'UNSOLD',
-    base_price: p2.base_price,
-    current_bid: null,
-    winning_bid: null,
-    winning_team_id: null,
-    is_mini_round: false,
-  });
+  const { error: unsoldLotError } = await supabaseAdmin
+    .from('auction_lots')
+    .update({
+      status: 'UNSOLD',
+      current_bid: p2.base_price,
+      winning_bid: null,
+      winning_team_id: null,
+      highest_bidder_team_id: null,
+      timer_expires_at: null,
+      get_ready_expires_at: null,
+    })
+    .eq('id', lot2.id);
+  expect(unsoldLotError).toBeNull();
 
-  // Deduct spend from host team
-  await supabaseAdmin
+  const { error: teamError } = await supabaseAdmin
     .from('teams')
     .update({
-      purse: 10000 - (p1.base_price + 50),
+      purse: 10000 - soldPrice,
       players_bought: 1,
       overseas_count: p1.is_overseas ? 1 : 0,
     })
     .eq('id', hostTeamId);
+  expect(teamError).toBeNull();
 
-  // Mark Auction COMPLETED
-  await supabaseAdmin
+  const { error: auctionError } = await supabaseAdmin
     .from('auctions')
     .update({
       status: 'COMPLETED',
@@ -108,6 +160,7 @@ async function setupF1CompletedAuction(hostUser: any, runId: string) {
       mega_completed_at: new Date().toISOString(),
     })
     .eq('id', auctionId);
+  expect(auctionError).toBeNull();
 
   return {
     roomId,
@@ -118,7 +171,6 @@ async function setupF1CompletedAuction(hostUser: any, runId: string) {
     p2,
   };
 }
-
 // Helper: Seed F2 (Mini Auction Initialized in SETUP)
 async function setupF2MiniInitialized(hostUser: any, runId: string) {
   const f1 = await setupF1CompletedAuction(hostUser, runId);
@@ -677,15 +729,17 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-013 — Refresh During Mini Auction
   // ==========================================================================
   test('MA-MINI-013 — Refresh During Mini Auction', async ({ page }) => {
-    const hostUser = await createDisposableTestUser();
+    const hostUser = await createSupabaseBrowserTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
     try {
+      await loginSupabaseTestUser(page, hostUser);
       const f2 = await setupF2MiniInitialized(hostUser, runId);
       roomId = f2.roomId;
 
-      await loginAndNavigate(page, hostUser, `/rooms/${f2.roomId}/mini-auction`);
+      await page.goto(`/rooms/${f2.roomId}/mini-auction`);
+      await page.waitForLoadState('domcontentloaded');
 
       // 1. Capture authoritative state before refresh
       const beforeRefresh = await supabaseAdmin
@@ -717,7 +771,11 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       expect(renderedAuctionId).toBe(f2.auctionId);
       expect(renderedSessionId).toBe(f2.miniAuctionSessionId);
     } finally {
-      if (roomId) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      try {
+        if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      } finally {
+        await cleanupSupabaseBrowserTestUser(hostUser);
+      }
     }
   });
 
@@ -725,8 +783,8 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-014 — Reconnect / Second Context Recovery
   // ==========================================================================
   test('MA-MINI-014 — Reconnect / Second Context Recovery', async ({ browser }) => {
-    const hostUser = await createDisposableTestUser();
-    const secondUser = await createDisposableTestUser();
+    const hostUser = await createSupabaseBrowserTestUser();
+    const secondUser = await createSupabaseBrowserTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
@@ -734,26 +792,29 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
     const secondContext = await browser.newContext();
 
     try {
+      const hostPage = await hostContext.newPage();
+      const secondPage = await secondContext.newPage();
+      await loginSupabaseTestUser(hostPage, hostUser);
+      await loginSupabaseTestUser(secondPage, secondUser);
+
       const f3 = await setupF3SelectionClosed(hostUser, runId);
       roomId = f3.roomId;
 
       // Add secondUser as room participant
-      await supabaseAdmin.from('room_participants').insert({
+      const { error: participantError } = await supabaseAdmin.from('room_participants').insert({
         id: crypto.randomUUID(),
         room_id: f3.roomId,
         user_id: secondUser.user.id,
         role: 'SPECTATOR',
       });
-
-      const hostPage = await hostContext.newPage();
-      const secondPage = await secondContext.newPage();
+      expect(participantError).toBeNull();
 
       // Context 1: Host opens mini-auction
-      await loginAndNavigate(hostPage, hostUser, `/rooms/${f3.roomId}/mini-auction`);
+      await hostPage.goto(`/rooms/${f3.roomId}/mini-auction`);
       await expect(hostPage.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
 
       // Context 2: Second user opens mini-auction
-      await loginAndNavigate(secondPage, secondUser, `/rooms/${f3.roomId}/mini-auction`);
+      await secondPage.goto(`/rooms/${f3.roomId}/mini-auction`);
       await expect(secondPage.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
 
       // Authoritative state
@@ -768,6 +829,39 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
 
       expect(context2Phase).toBe(authoritative!.status);
       expect(context2SessionId).toBe(authoritative!.id);
+      // The host advances the session; the spectator must receive the authoritative realtime state.
+      await hostPage.getByRole('button', { name: /START MINI AUCTION/i }).click();
+      try {
+        await expect(hostPage.getByTestId('mini-auction-phase')).toHaveAttribute('data-status', 'BIDDING', { timeout: 15000 });
+      } catch {
+        const startErrors = await hostPage.locator('p.text-red-400').allTextContents();
+        const { data: failedStartState } = await supabaseAdmin
+          .from('mini_auction_sessions')
+          .select('status')
+          .eq('auction_id', f3.auctionId)
+          .single();
+        throw new Error(`Mini-auction start did not advance. Database=${failedStartState?.status}; UI error=${startErrors.join(' | ') || 'none'}.`);
+      }
+      await expect(secondPage.getByTestId('mini-auction-phase')).toHaveAttribute('data-status', 'BIDDING', { timeout: 15000 });
+      const { data: afterStart } = await supabaseAdmin
+        .from('mini_auction_sessions')
+        .select('*')
+        .eq('auction_id', f3.auctionId)
+        .single();
+      expect(afterStart!.status).toBe('BIDDING');
+      expect(afterStart!.id).toBe(authoritative!.id);
+      // Refresh the second context and verify it recovers the same authoritative session.
+      await secondPage.reload();
+      await expect(secondPage.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
+      expect(await secondPage.getByTestId('mini-auction-phase').getAttribute('data-status')).toBe(afterStart!.status);
+      expect(await secondPage.getByTestId('mini-auction-page').getAttribute('data-session-id')).toBe(authoritative!.id);
+
+      // A late second tab in the same context must also join the existing session.
+      const secondTab = await secondContext.newPage();
+      await secondTab.goto(`/rooms/${f3.roomId}/mini-auction`);
+      await expect(secondTab.getByTestId('mini-auction-page')).toBeVisible({ timeout: 15000 });
+      expect(await secondTab.getByTestId('mini-auction-phase').getAttribute('data-status')).toBe(afterStart!.status);
+      expect(await secondTab.getByTestId('mini-auction-page').getAttribute('data-session-id')).toBe(authoritative!.id);
 
       // Verify no duplicate session was created
       const { data: sessions } = await supabaseAdmin
@@ -779,7 +873,12 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
     } finally {
       await hostContext.close();
       await secondContext.close();
-      if (roomId) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      try {
+        if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      } finally {
+        await cleanupSupabaseBrowserTestUser(secondUser);
+        await cleanupSupabaseBrowserTestUser(hostUser);
+      }
     }
   });
 
@@ -824,41 +923,34 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
   // MA-MINI-016 — Full Main → Summary → Mini Lifecycle (Serial Full Lifecycle)
   // ==========================================================================
   test('MA-MINI-016 — Full Main → Summary → Mini Lifecycle', async ({ page }) => {
-    const hostUser = await createDisposableTestUser();
+    const hostUser = await createSupabaseBrowserTestUser();
     const runId = hostUser.runId;
     let roomId = '';
 
     try {
-      // 1. Fresh Main Auction (F0)
-      const auctionSetup = await setupDisposableAuction(hostUser.supabase, runId);
+      await loginSupabaseTestUser(page, hostUser);
+
+      // 1. Seed the completed main auction with one sold and one unsold existing lot.
+      const auctionSetup = await setupF1CompletedAuction(hostUser, runId);
       roomId = auctionSetup.roomId;
       const auctionId = auctionSetup.auctionId;
       const hostTeamId = auctionSetup.hostTeamId;
+      const players = [auctionSetup.p1, auctionSetup.p2];
 
-      const { data: players } = await supabaseAdmin.from('players').select('*').limit(2);
-      const p1 = players![0];
-
-      // Finalize Main lot to reach COMPLETED
-      await supabaseAdmin.from('auction_lots').insert({
-        id: crypto.randomUUID(),
-        auction_id: auctionId,
-        player_id: p1.id,
-        lot_index: 1,
-        status: 'SOLD',
-        base_price: p1.base_price,
-        winning_bid: p1.base_price,
-        winning_team_id: hostTeamId,
-        is_mini_round: false,
-      });
-
-      await supabaseAdmin.from('auctions').update({
-        status: 'COMPLETED',
-        completed_at: new Date().toISOString(),
-        mega_completed_at: new Date().toISOString(),
-      }).eq('id', auctionId);
+      const nativeToken = await nativeBrowserAccessToken(page);
+      expect(nativeToken).toBeTruthy();
+      const roomRead = await page.request.get(
+        `${process.env.SUPABASE_TEST_URL}/rest/v1/rooms?id=eq.${roomId}&select=id,host_id`,
+        { headers: { apikey: process.env.SUPABASE_TEST_ANON_KEY!, authorization: `Bearer ${nativeToken}` } }
+      );
+      expect(roomRead.ok()).toBe(true);
+      expect(await roomRead.json()).toEqual([
+        expect.objectContaining({ id: roomId, host_id: hostUser.profileId }),
+      ]);
 
       // 2. Open Summary
-      await loginAndNavigate(page, hostUser, `/rooms/${roomId}/summary`);
+      await page.goto(`/rooms/${roomId}/summary`);
+      await page.waitForLoadState('domcontentloaded');
       await expect(page.getByTestId('mini-auction-start')).toBeVisible();
 
       // 3. Start Mini Auction -> SETUP
@@ -924,7 +1016,11 @@ test.describe.serial('MA-MINI Lifecycle & Failure-Handling Tests', () => {
       await expect(phaseBadge).toHaveAttribute('data-status', 'COMPLETED');
       await expect(page.getByTestId('mini-auction-complete')).toBeVisible();
     } finally {
-      if (roomId) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      try {
+        if (roomId && hostUser.supabase) await cleanupDisposableAuction(hostUser.supabase, roomId);
+      } finally {
+        await cleanupSupabaseBrowserTestUser(hostUser);
+      }
     }
   });
 });

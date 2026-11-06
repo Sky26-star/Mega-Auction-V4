@@ -2,13 +2,43 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'audit/**', 'codex/**' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-check-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: mega_auction_test
+        ports:
+          - 55325:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgrespassword@127.0.0.1:55325/mega_auction_test
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: test-anon-key-ci
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      AUCTION_TICK_SECRET: ci_test_auction_tick_secret_minimum_32_characters_length_ok
 
     steps:
       - name: Checkout Repository
@@ -17,7 +47,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
 
       - name: Install Dependencies
@@ -29,8 +59,143 @@ jobs:
       - name: ESLint Audit
         run: npm run lint
 
-      - name: Unit & Integration Tests (Vitest)
-        run: npm run test:run
+      - name: Run Database Migrations
+        run: |
+          which psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+          PGPASSWORD=postgrespassword sh scripts/ci-apply-migrations.sh
+
+      - name: Database-Backed Integration Verification (Fail if Skipped)
+        env:
+          DISPOSABLE_TEST_DATABASE_URL: postgresql://postgres:postgrespassword@127.0.0.1:55325/mega_auction_test
+        # Both suites reinstall shared RPCs; keep their multi-client races inside sequential files.
+        run: |
+          npx vitest run \
+            src/test/database/auction-rpc-concurrency.integration.test.ts \
+            src/test/database/auction-rpc-security.integration.test.ts \
+            --no-file-parallelism \
+            --reporter=default \
+            --reporter=json \
+            --outputFile=db-test-results.json
+          node scripts/verify-ci-db-test-results.mjs db-test-results.json
+          rm -f db-test-results.json
+
+      - name: Native Auth and Scheduler Database Verification
+        env:
+          DISPOSABLE_TEST_DATABASE_URL: postgresql://postgres:postgrespassword@127.0.0.1:55325/mega_auction_test
+        run: node scripts/check-release-database.mjs
+
+      - name: Fresh Project Grants and Realtime Compatibility
+        run: |
+          set -euo pipefail
+          container=""
+
+          cleanup_fresh_ci() {
+            local result=$?
+            trap - EXIT
+            set +e
+
+            if [[ "$container" =~ ^[0-9a-f]{12,64}$ ]]; then
+              label=$(docker inspect --format '{{ index .Config.Labels "mega-auction.purpose" }}' "$container" 2>/dev/null)
+              if [ "$label" = "fresh-project-validation-ci" ]; then
+                docker rm -f "$container" >/dev/null 2>&1 || true
+              fi
+            fi
+
+            exit "$result"
+          }
+
+          trap cleanup_fresh_ci EXIT
+
+          container=$(docker run --detach --network none \
+            --label mega-auction.purpose=fresh-project-validation-ci \
+            --tmpfs /var/lib/postgresql/data:rw,size=768m \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=mega_auction_test \
+            postgres:17-alpine postgres -p 55325 -c wal_level=logical)
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" psql -X -h /var/run/postgresql -p 55325 -U postgres -d mega_auction_test -c 'SELECT 1' >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs "$container"
+            exit 1
+          fi
+          node scripts/check-fresh-project-database.mjs --container "$container"
+
+      - name: Native Scheduler Recovery and Real Failure Injection
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/build-scheduler-migration.mjs
+
+          container=""
+          cron_container=""
+
+          cleanup_owned_ci_container() {
+            local id="$1"
+            local expected="$2"
+
+            if [[ "$id" =~ ^[0-9a-f]{12,64}$ ]]; then
+              label=$(docker inspect --format '{{ index .Config.Labels "mega-auction.purpose" }}' "$id" 2>/dev/null)
+              if [ "$label" = "$expected" ]; then
+                docker rm -f "$id" >/dev/null 2>&1 || true
+              fi
+            fi
+          }
+
+          cleanup_native_scheduler_ci() {
+            local result=$?
+            trap - EXIT
+            set +e
+
+            if [ -z "$cron_container" ] && [ -f native-cron-results.log ]; then
+              cron_container=$(sed -n 's/^Cron validation container: //p' native-cron-results.log | tail -n 1)
+            fi
+
+            cleanup_owned_ci_container "$cron_container" "isolated-cron-validation"
+            cleanup_owned_ci_container "$container" "isolated-action-ledger"
+
+            exit "$result"
+          }
+
+          trap cleanup_native_scheduler_ci EXIT
+
+          container=$(docker run --detach --network none \
+            --label mega-auction.purpose=isolated-action-ledger \
+            --tmpfs /var/lib/postgresql/data:rw,size=768m \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            postgres:17-alpine postgres -p 55325 -c wal_level=logical)
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" pg_isready -U postgres -p 55325 >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          node scripts/validate-scheduler-database.mjs "$container" | tee native-scheduler-results.log
+          fixture=$(sed -n 's/^VALIDATED_FIXTURE=//p' native-scheduler-results.log)
+          test -n "$fixture"
+          docker pull public.ecr.aws/supabase/postgres:17.6.1.155
+          node scripts/validate-scheduler-cron.mjs "$container" "$fixture" | tee native-cron-results.log
+          cron_container=$(sed -n 's/^Cron validation container: //p' native-cron-results.log)
+          test -n "$cron_container"
+          node scripts/check-scheduler-restart.mjs "$cron_container"
+
+      - name: Full Unit & Regression Suite (Vitest)
+        run: npm run test:run -- --maxWorkers=2
 
       - name: Build Application
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://release-check.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-only-public-key
+          NEXT_PUBLIC_APP_URL: https://release-check.invalid
+          SUPABASE_SERVICE_ROLE_KEY: build-only-server-key
         run: npm run build
+
+      - name: Verify No Diagnostic Route in Production Manifest
+        run: npm run check:no-diagnostic-route

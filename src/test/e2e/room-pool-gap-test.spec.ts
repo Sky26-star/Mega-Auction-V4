@@ -1,7 +1,6 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import * as dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
