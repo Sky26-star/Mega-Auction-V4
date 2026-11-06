@@ -1,6 +1,6 @@
 import { AuctionTickHttpError, AuctionTickTimeoutError } from './tick-client';
 
-const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 504]);
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_NETWORK_CODES = new Set([
   'ECONNREFUSED',
   'ECONNRESET',
@@ -52,6 +52,7 @@ export interface AuctionTickLoopOptions {
   now?: () => number;
   onTransientError?: (error: unknown, retryCount: number, delayMs: number) => void;
   onFatalError?: (error: unknown) => void;
+  maxConsecutiveFailures?: number;
 }
 
 function abortableWait(ms: number, signal: AbortSignal): Promise<void> {
@@ -72,6 +73,8 @@ export async function runAuctionTickLoop(options: AuctionTickLoopOptions): Promi
   const intervalMs = options.intervalMs ?? 500;
   const wait = options.wait ?? abortableWait;
   const now = options.now ?? Date.now;
+  const maxFailures = options.maxConsecutiveFailures ?? 5;
+  if (!Number.isSafeInteger(maxFailures) || maxFailures < 1) throw new Error('Invalid tick retry limit.');
   let retryCount = 0;
 
   while (!options.signal.aborted) {
@@ -85,6 +88,10 @@ export async function runAuctionTickLoop(options: AuctionTickLoopOptions): Promi
         return 1;
       }
       retryCount += 1;
+      if (retryCount >= maxFailures) {
+        options.onFatalError?.(new Error(`Auction tick circuit opened after ${retryCount} consecutive failures; operator review required.`));
+        return 1;
+      }
       const computeDelay = options.computeDelay ?? retryDelayMs;
       const delayMs = computeDelay(retryCount);
       options.onTransientError?.(error, retryCount, delayMs);

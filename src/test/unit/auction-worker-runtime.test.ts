@@ -5,7 +5,7 @@ import { isRecoverableTickError, retryDelayMs, runAuctionTickLoop } from '@/lib/
 describe('auction worker runtime', () => {
   it('retries only known temporary HTTP and network failures', () => {
     expect(isRecoverableTickError(new AuctionTickTimeoutError(10_000))).toBe(true);
-    expect(isRecoverableTickError(new AuctionTickHttpError(503))).toBe(false);
+    expect(isRecoverableTickError(new AuctionTickHttpError(503))).toBe(true);
     expect(isRecoverableTickError(new AuctionTickHttpError(429))).toBe(true);
     expect(isRecoverableTickError(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }))).toBe(true);
     expect(isRecoverableTickError(new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }))).toBe(true);
@@ -17,6 +17,30 @@ describe('auction worker runtime', () => {
     expect(retryDelayMs(1)).toBe(500);
     expect(retryDelayMs(2)).toBe(1_000);
     expect(retryDelayMs(20)).toBe(30_000);
+  });
+
+  it('opens its circuit after five consecutive transient failures with one operator alert', async () => {
+    const tick = vi.fn().mockRejectedValue(new AuctionTickHttpError(503));
+    const wait = vi.fn(async () => undefined);
+    const onFatalError = vi.fn();
+    expect(await runAuctionTickLoop({ tick, signal: new AbortController().signal, wait, onFatalError })).toBe(1);
+    expect(tick).toHaveBeenCalledTimes(5);
+    expect(wait).toHaveBeenCalledTimes(4);
+    expect(onFatalError).toHaveBeenCalledOnce();
+    expect(onFatalError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('operator review') }));
+  });
+
+  it('resets the consecutive failure budget after recovery', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const tick = vi.fn(async () => {
+      calls++;
+      if (calls === 3) controller.abort();
+      if (calls === 1 || calls === 3) throw new AuctionTickHttpError(503);
+    });
+    expect(await runAuctionTickLoop({ tick, signal: controller.signal, maxConsecutiveFailures: 2,
+      wait: async () => undefined })).toBe(0);
+    expect(calls).toBe(3);
   });
 
   it('exits on fatal errors instead of retrying indefinitely', async () => {

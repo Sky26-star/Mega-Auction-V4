@@ -10,6 +10,7 @@ const reportFile = process.argv.includes('--report')
   ? process.argv[process.argv.indexOf('--report') + 1] : undefined;
 const results = [];
 const forward = 'supabase/migrations/20261104100000_explicit_runtime_reads_and_mini_realtime.sql';
+const nativeScheduler = 'supabase/migrations/20261105120000_native_scheduler_recovery.sql';
 const bridge = readFileSync('supabase/operations/fresh-project-profile-acl.sql', 'utf8');
 const guardedMigration = 'supabase/migrations/20261017100000_room_scoped_profile_access.sql';
 const docker = args => execFileSync('docker', args, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
@@ -54,7 +55,7 @@ try {
   const files = docker(['exec', container, 'postgres', '--version']).trim();
   record('runtime', { postgres: files, hostedConnections: 0, publishedPorts: 0 });
   const tracked = execFileSync('git', ['ls-files', 'supabase/migrations/*.sql'], { encoding: 'utf8' })
-    .trim().split(/\r?\n/).filter(file => file !== forward).sort();
+    .trim().split(/\r?\n/).filter(file => file !== forward && file !== nativeScheduler).sort();
   if (tracked.length !== 75) throw Error(`Expected 75 historical migrations; found ${tracked.length}.`);
   for (const file of tracked) {
     if (hash(readFileSync(file)) !== hash(execFileSync('git', ['show', `HEAD:${file}`]))) {
@@ -108,13 +109,21 @@ try {
     const assertions = query(database, readFileSync('scripts/fresh-project-database-assertions.sql', 'utf8'));
     record('runtime-security-assertions', { mode, passed: true, assertions: (assertions.stderr.match(/NOTICE:\s+PASS:/g) || []).length,
       policyAndFunctionFingerprintUnchanged: true, forwardMigrationIdempotent: true, lateBridgeRejected: true });
+    query(database, readFileSync(nativeScheduler, 'utf8'));
+    query(database, `DO $$ BEGIN
+      IF NOT (SELECT NOT enabled AND delivery_owner='DATABASE' FROM auction_recovery.control WHERE singleton)
+        OR has_schema_privilege('authenticated','auction_recovery','USAGE')
+        OR has_function_privilege('anon','public.request_mini_start(uuid,uuid,timestamptz)','EXECUTE')
+      THEN RAISE EXCEPTION 'Native scheduler must install disabled with private grants'; END IF;
+    END $$;`);
+    record('native-scheduler-additive-install', { mode, file: nativeScheduler, disabled: true, passed: true });
     const counts = query(database, `SELECT json_build_object(
       'tables',(SELECT count(*) FROM pg_tables WHERE schemaname='public'),
       'players',(SELECT count(*) FROM public.players),
       'functions',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'),
       'publication_members',(SELECT count(*) FROM pg_publication_tables WHERE pubname='supabase_realtime'),
       'fixture_users',(SELECT count(*) FROM auth.users));`).stdout.trim();
-    record('replay-complete', { mode, historicalMigrations: tracked.length, forwardMigrations: 1, catalog: JSON.parse(counts) });
+    record('replay-complete', { mode, historicalMigrations: tracked.length, forwardMigrations: 2, catalog: JSON.parse(counts) });
   }
   record('complete', { passed: true });
 } catch (error) {

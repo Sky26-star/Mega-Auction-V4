@@ -8,7 +8,11 @@ const docker = process.argv.includes('--docker');
 const container = 'mega-auction-native-release-check-20261102';
 const operation = readFileSync('supabase/operations/auction-scheduler.sql', 'utf8')
   .replace(/^BEGIN;\s*$/m, '').replace(/^COMMIT;\s*$/m, '');
-const sql = `BEGIN;\n${readFileSync('scripts/release-database-mocks.sql', 'utf8')}\n${operation}\n${readFileSync('scripts/release-database-assertions.sql', 'utf8')}\nROLLBACK;`;
+// This guarded rollback-only suite tests the retained LEGACY compatibility path.
+// Native DATABASE ownership and service-role denial have a separate real suite.
+const legacyMode = `DO $$ BEGIN IF to_regclass('auction_recovery.control') IS NOT NULL THEN
+ UPDATE auction_recovery.control SET delivery_owner='LEGACY'; END IF; END $$;`;
+const sql = `BEGIN;\n${readFileSync('scripts/release-database-mocks.sql', 'utf8')}\n${legacyMode}\n${operation}\n${readFileSync('scripts/release-database-assertions.sql', 'utf8')}\nROLLBACK;`;
 const file = join(mkdtempSync(join(tmpdir(), 'mega-auction-release-')), 'check.sql');
 writeFileSync(file, sql);
 try {

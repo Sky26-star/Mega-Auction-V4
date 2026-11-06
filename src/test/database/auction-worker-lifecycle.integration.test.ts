@@ -257,6 +257,7 @@ describe.skipIf(!disposableDatabase.configured)('Auction Worker & Orchestrator E
     );
 
     expect(botBidAction).toBeDefined();
+    if (!botBidAction) throw new Error('Expected an applied bot bid action');
     expect(botBidAction.result).toBe('APPLIED');
     expect(botBidAction.team).toBe(botTeamId);
     expect(botBidAction.amount).toBe(200); // base price

@@ -1,5 +1,24 @@
 # Mega Auction V4: zero-budget launch
 
+## Current scheduler candidate — 5 November 2026
+
+The current local work replaces HTTP timers with PostgreSQL-owned scheduling.
+Use [the native recovery runbook](SCHEDULER_NATIVE_RECOVERY_RUNBOOK.md) and
+[the validation status](SCHEDULER_RECOVERY_IMPLEMENTATION_STATUS.md) for the
+proposed migration, cutover, recovery and approval gates. It installs disabled;
+no hosted migration or activation is authorized. Keep bots disabled and Vercel
+Standard Protection unchanged. Native timers require neither pg_net nor a
+Vercel bypass secret.
+
+The sections below describe the historical HTTP launch design and earlier Auth
+decisions. They are retained as historical context, **not current installation
+instructions**. In particular, do not install/activate the HTTP scheduler or
+copy its Vault/protection configuration while reviewing the native candidate.
+Google/GitHub login status must be verified on the exact hosted deployment;
+the earlier email/password decision below is not proof of current Auth settings.
+
+## Historical HTTP launch design (superseded for timer cutover)
+
 Prepared 2 November 2026. This guide replaces the old Fly/Clerk launch instructions. Actual Vercel deployment and hosted activation are deferred to the next deployment session.
 
 ## Architecture
@@ -33,13 +52,21 @@ Do this in the selected hosted Supabase project as the database owner; these fil
 
 1. Enable pg_cron, pg_net and Supabase Vault through Supabase integrations/extensions. The project must support one-second cron schedules. Official docs: https://supabase.com/docs/guides/cron and https://supabase.com/docs/guides/functions/schedule-functions.
 2. Run supabase/operations/auction-scheduler.sql. Installation starts disabled and cannot send requests. auction_private is not an exposed API schema; API roles have no privileges on it.
-3. After deployment, POST /api/auction/tick without a secret must return 401; with the configured secret it must return 200 and success true. Use a private operator tool and do not print or paste the secret into logs. If Vercel deployment protection blocks machine access, configure the intended production endpoint appropriately; do not use a protected preview URL.
+3. After separately approving hosted HTTP testing, POST /api/auction/tick without a secret must return 401; an authenticated successful tick must return HTTP 200 with schemaVersion=1, success=true, failureCount=0 and explicit per-action statuses. Partial failures return 503 and must not be called healthy. An authenticated POST can advance every due auction in the backend; it is not a read-only authentication probe. Never print credentials or response payloads containing sensitive details.
 4. In Supabase Vault create exactly two named secrets: mega_auction_tick_url = https://YOUR-STABLE-VERCEL-ORIGIN/api/auction/tick, and mega_auction_tick_secret = the same AUCTION_TICK_SECRET stored in Vercel. Enter values through Vault/private tooling, not committed SQL.
-5. Run supabase/operations/schedule-auction-tick.sql once. It installs the named tick and retention jobs. Then enable the scheduler with UPDATE auction_private.scheduler_state SET enabled=true, failures=0, request_id=NULL, next_attempt_at=now() WHERE singleton;
-6. Inspect SELECT enabled,last_outcome,last_http_status,failures,requested_at FROM auction_private.scheduler_state; and cron job history. An idle room should generate no tick HTTP requests. A configuration_error requires correcting the endpoint/credentials and explicitly re-enabling. Temporary failures back off up to 30 seconds.
+5. Job registration and activation require separate approval from installation. To register inactive jobs, wrap supabase/operations/schedule-auction-tick.sql in BEGIN/COMMIT and, before committing, call cron.alter_job(jobid, active := false) for only mega-auction-tick and mega-auction-cron-retention. Do not activate either job or the dispatcher during installation. Never clear an outstanding request ID during recovery without reconciling the queued/in-flight HTTP operation.
+6. Inspect SELECT enabled,last_outcome,last_http_status,failures,requested_at FROM auction_private.scheduler_state; and cron job history. An idle room should generate no tick HTTP requests. A configuration_error, unsupported_protected_transport or retry_exhausted outcome requires operator review before a separately approved restart. Temporary failures use exponential backoff; the circuit disables after five consecutive HTTP/queue failures. Safe database warnings and worker fatal-error callbacks signal operator attention; external alert delivery is not configured by this code.
 7. Confirm there is exactly one production timer driver. Disable legacy tick/backstop jobs targeting the same auctions and never run the local worker against the hosted production project. Do not remove unrelated jobs.
 
-The Node API has a 10-second maximum duration and pg_net uses a matching HTTP timeout. The dispatcher waits up to 15 seconds before retrying an absent response. Database locks/idempotent RPCs remain the authority for bids and settlement. This controls duplicate requests but is not a guarantee against all network delays.
+The Node API has a 20-second maximum duration; the worker and pg_net wait 25 seconds; the dispatcher reconciles a missing response after 30 seconds. These budgets provide headroom, not a transition-latency guarantee. Database locks/idempotent RPCs remain the authority for bids and settlement; delivery is not exactly once.
+
+Deploy and verify the matching versioned tick API before starting/upgrading either worker: old deployments without the structured response contract are deliberately incompatible and fail closed. This document does not authorize that deployment or hosted installation/activation.
+
+### Protected Preview transport: unresolved hosted prerequisite
+
+Keep Vercel Standard Protection enabled. pg_net 0.20.4 follows redirects internally (its HTTP API offers no per-request redirect disable switch). Never add x-vercel-protection-bypass to this transport: custom secret headers can be forwarded to redirect destinations before SQL sees the final response. Unexpected 3xx responses and final login HTML/invalid contracts disable this dispatcher. Those response checks do not prevent forwarding of the existing tick header on an internally followed redirect. A separately reviewed no-redirect relay/transport is required before using this SQL scheduler with a protected Preview. Adding a Vault entry named mega_auction_vercel_bypass_secret deliberately disables dispatch without reading/transmitting its value; it does not enable bypass support.
+
+The Node worker's optional server-only AUCTION_TICK_VERCEL_BYPASS_SECRET supports a separate automation credential for an explicitly configured HTTPS vercel.app endpoint. It uses redirect: manual, sends credentials only in headers, never sets bypass cookies, and stops on redirects/invalid response contracts. This is locally testable transport support, not a hosted worker service or permission to provision credentials. Never put the variable in NEXT_PUBLIC_*, browser code, URLs, logs or committed environment files. Never run this worker alongside a cron/legacy worker against the same backend. Creating a Vercel bypass credential, secure storage, deploying any transport and activating a scheduler each require explicit approval.
 
 ## Public smoke test before sharing
 
@@ -51,4 +78,4 @@ The isolated local SQL rehearsal covers native profile creation, duplicate usern
 
 Zero budget can support an initial personal friend launch within included allowances, not unlimited rooms or guaranteed uninterrupted uptime. Supabase free projects may pause after low activity and have database, connection, realtime and egress limits; Vercel Hobby has usage limits. Review dashboards before each event. Do not add a payment card or enable paid upgrades without explicit user authorization. See https://supabase.com/pricing, https://supabase.com/docs/guides/platform/free-project-pausing and https://vercel.com/docs/plans/hobby.
 
-To stop timer dispatch: UPDATE auction_private.scheduler_state SET enabled=false WHERE singleton; then unschedule only mega-auction-tick if needed. Pause active rooms before maintenance. Auth deployment rollback also requires restoring the matching Auth provider configuration; changing the UI alone is insufficient. Never restore a stale database backup over completed real auctions as a routine application rollback.
+To stop timer dispatch, after approval: UPDATE auction_private.scheduler_state SET enabled=false WHERE singleton; and deactivate only mega-auction-tick and mega-auction-cron-retention with cron.alter_job. Preserve objects, Vault entries and logs for investigation. Already queued/in-flight HTTP requests may still finish; reconcile before restarting. Pause active rooms before maintenance only with approval. Auth deployment rollback also requires restoring the matching Auth provider configuration; changing the UI alone is insufficient. Never restore a stale database backup over completed real auctions as a routine application rollback.

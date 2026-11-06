@@ -100,6 +100,22 @@ describe('development worker startup and shutdown', () => {
     expect(next.killed).toBe(true);
   });
 
+  it('keeps the web server independent of the legacy worker in explicit web-only mode', async () => {
+    const next = new FakeChild();
+    const spawnImpl = vi.fn(() => next);
+    const run = runDevRunner({
+      webOnly: true, platform: 'linux', spawnImpl, processRef: new EventEmitter(),
+      log: { log: vi.fn() },
+      readiness: { fetchImpl: vi.fn(async () => new Response(null, { status: 405 })) },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(next.killed).toBe(false);
+    next.exitCode = 0;
+    next.emit('exit', 0, null);
+    await expect(run).resolves.toBe(0);
+  });
+
   it('waits for Windows taskkill to finish and targets the entire child tree', async () => {
     const child = new FakeChild();
     const taskkill = new EventEmitter();

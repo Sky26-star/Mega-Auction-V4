@@ -5,6 +5,8 @@ import { submitBotBid } from '@/lib/auction/bot-bid-submission';
 import { getAuctionRpcFailure } from '@/lib/auction/rpc-response';
 import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import crypto from 'crypto';
+import { tickResult, tickRejectionStatus, type TickAction, type TickResult } from './tick-result';
+export type { TickResult } from './tick-result';
 
 // Ephemeral Process-Local Evidence Store (Phase 14)
 const ephemeralEvidenceStore: Map<string, BotDecisionEvidence[]> = ((globalThis as any).__ephemeralEvidenceStore ??= new Map<string, BotDecisionEvidence[]>());
@@ -15,13 +17,8 @@ const BOT_BRAIN_DEBUG = process.env.NODE_ENV !== 'production';
 // Module-level concurrency control: prevents overlapping tick runs on the same auction
 const activeAuctionTicks = new Set<string>();
 
-export interface TickResult {
-  actions: any[];
-  message?: string;
-}
-
 export async function executeAuctionTick(supabase: any): Promise<TickResult> {
-  const actionsTaken: any[] = [];
+  const actionsTaken: TickAction[] = [];
 
   // Step 0: Process Mini Auction selection expiry for completed parent auctions
   try {
@@ -33,6 +30,9 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
       ? await miniQuery.lte('selection_expires_at', new Date().toISOString())
       : await miniQuery;
 
+    if (miniError) {
+      actionsTaken.push({ action: 'READ_MINI_SELECTIONS_FAILED', status: 'failed', error: miniError.message });
+    }
     if (!miniError && expiredMiniSessions && expiredMiniSessions.length > 0) {
       for (const session of expiredMiniSessions) {
         const { data: closeRes, error: closeErr } = await supabase.rpc('v3_close_mini_selection', {
@@ -40,15 +40,17 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         });
         const closeFailure = getAuctionRpcFailure(closeRes, closeErr, 'RPC returned no successful result.');
         if (closeFailure) {
-          console.error(`[MINI_TICKER] Failed to close mini selection for auction ${session.auction_id}:`, closeFailure);
+          console.error('[MINI_TICKER] Close mini selection RPC failed.');
+          actionsTaken.push({ auction: session.auction_id, action: 'CLOSE_MINI_SELECTION_FAILED', status: 'failed', error: closeFailure });
         } else {
-          console.log(`[MINI_TICKER] Closed mini selection for auction ${session.auction_id}:`, closeRes);
-          actionsTaken.push({ auction: session.auction_id, action: 'CLOSE_MINI_SELECTION', result: closeRes });
+          console.log(`[MINI_TICKER] Closed mini selection for auction ${session.auction_id}.`);
+          actionsTaken.push({ auction: session.auction_id, action: 'CLOSE_MINI_SELECTION', status: 'succeeded', result: closeRes });
         }
       }
     }
-  } catch (err: any) {
-    console.error('[MINI_TICKER] Error processing expired mini sessions:', err.message || err);
+  } catch {
+    console.error('[MINI_TICKER] Failed to process expired mini sessions.');
+    actionsTaken.push({ action: 'PROCESS_MINI_SELECTIONS_FAILED', status: 'failed', error: 'Mini-selection processing failed.' });
   }
 
   // 1. Find active, paused, or mini auctions
@@ -59,7 +61,7 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
 
   if (auctionsError) throw auctionsError;
   if (!activeAuctions || activeAuctions.length === 0) {
-    return { actions: actionsTaken, message: actionsTaken.length > 0 ? 'Processed mini ticks' : 'No active or paused auctions' };
+    return tickResult(actionsTaken, actionsTaken.length > 0 ? 'Processed mini ticks' : 'No active or paused auctions');
   }
 
   // Defensive cleanup: find all auctions NOT in the active list and clear their memory/state
@@ -88,27 +90,32 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
             const parsed = JSON.parse(auction.paused_reason);
             if (parsed.resume_expires_at && Date.now() >= parsed.resume_expires_at) {
               const { data: resumeData, error: resumeError } = await supabase.rpc('resume_auction', { p_auction_id: auction.id });
-              if (resumeError || (resumeData && !resumeData.success)) {
-                console.error(`[TICKER] Failed to resume auction ${auction.id}:`, resumeError || resumeData?.error);
+              const resumeFailure = getAuctionRpcFailure(resumeData, resumeError, 'RPC returned no successful result.');
+              if (resumeFailure) {
+                actionsTaken.push({ auction: auction.id, action: 'RESUME_AUCTION_FAILED', status: 'failed', error: resumeFailure });
+                console.error('[TICKER] Resume auction RPC failed.');
               } else {
                 console.log(`[TICKER] Resumed auction ${auction.id} after countdown`);
-                actionsTaken.push({ auction: auction.id, action: 'RESUME_AUCTION' });
+                actionsTaken.push({ auction: auction.id, action: 'RESUME_AUCTION', status: 'succeeded' });
               }
             }
-          } catch (e) {
-            // Ignore parse errors
+          } catch {
+            actionsTaken.push({ auction: auction.id, action: 'RESUME_AUCTION_FAILED', status: 'failed', error: 'Resume state or RPC could not be processed.' });
           }
         }
         continue; // Skip further lot processing for paused auctions
       }
 
       if (auction.status === 'MINI_AUCTION') {
-        const { data: session } = await supabase
+        const { data: session, error: sessionError } = await supabase
           .from('mini_auction_sessions')
           .select('id, status, selection_expires_at')
           .eq('auction_id', auction.id)
           .single();
 
+        if (sessionError) {
+          actionsTaken.push({ auction: auction.id, action: 'READ_MINI_SESSION_FAILED', status: 'failed', error: sessionError.message });
+        }
         if (session && session.status === 'SELECTION_OPEN' && session.selection_expires_at) {
           const nowMs = Date.now();
           const expiresMs = new Date(session.selection_expires_at).getTime();
@@ -121,24 +128,14 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
 
             const closeFailure = getAuctionRpcFailure(data, closeError, 'RPC returned no successful result.');
             if (closeFailure) {
-              console.error(`[TICKER] Failed to close mini selection for ${auction.id}:`, closeFailure);
-              actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION_FAILED', error: closeFailure });
+              console.error('[TICKER] Close mini selection RPC failed.');
+              actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION_FAILED', status: 'failed', error: closeFailure });
             } else {
               console.log(`[TICKER] Closed mini selection for ${auction.id} after timeout`);
-              actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION' });
+              actionsTaken.push({ auction: auction.id, action: 'CLOSE_MINI_SELECTION', status: 'succeeded' });
 
-              // Automatically start the Mini Auction if there are valid nominations
-              if (data.total_lots > 0) {
-                const { data: startData, error: startError } = await supabase.rpc('v3_start_mini_auction', { p_auction_id: auction.id });
-                const startFailure = getAuctionRpcFailure(startData, startError, 'RPC returned no successful result.');
-                if (startFailure) {
-                  console.error(`[TICKER] Failed to auto-start mini auction for ${auction.id}:`, startFailure);
-                  actionsTaken.push({ auction: auction.id, action: 'START_MINI_AUCTION_FAILED', error: startFailure });
-                } else {
-                  console.log(`[TICKER] Auto-started mini auction for ${auction.id}`);
-                  actionsTaken.push({ auction: auction.id, action: 'START_MINI_AUCTION' });
-                }
-              }
+              // Selection closure does not authorize a start. Preserve the host
+              // review step; only explicit host intent may start mini bidding.
             }
           }
         }
@@ -163,7 +160,7 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
       }
 
       if (!lot && typeof auction.current_lot_index === 'number') {
-        const { data: lotData } = await supabase
+        const { data: lotData, error: fallbackError } = await supabase
           .from('auction_lots')
           .select(`
             id, lot_index, status, current_bid, base_price, highest_bidder_team_id,
@@ -174,12 +171,18 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           .eq('lot_index', auction.current_lot_index)
           .maybeSingle();
 
+        if (fallbackError) {
+          actionsTaken.push({ auction: auction.id, action: 'READ_LOT_FAILED', status: 'failed', error: fallbackError.message });
+        }
         if (lotData) {
           lot = lotData;
         }
       }
 
-      if (!lot) continue;
+      if (!lot) {
+        actionsTaken.push({ auction: auction.id, action: 'READ_LOT_FAILED', status: 'failed', error: 'Current lot is unavailable.' });
+        continue;
+      }
 
       const now = Date.now();
       const getReadyExpiresAt = lot.get_ready_expires_at ? new Date(lot.get_ready_expires_at).getTime() : 0;
@@ -195,20 +198,32 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         });
 
         if (data && data.success === false) {
-          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=SKIPPED\nreason=${data.error}`);
-          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING_REJECTED', error: data.error });
+          const rejectionStatus = tickRejectionStatus(data.error);
+
+          console.log(
+            `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=${rejectionStatus === 'skipped' ? 'SKIPPED' : 'FAILED'}\nreason=RPC_REJECTED`
+          );
+
+          actionsTaken.push({
+            auction: auction.id,
+            lot: lot.id,
+            action: 'START_BIDDING_REJECTED',
+            status: rejectionStatus,
+            error: data.error,
+          });
+
           continue;
         }
 
         const startFailure = getAuctionRpcFailure(data, error, 'RPC returned no successful result.');
         if (startFailure) {
-          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=FAILED\nreason=${startFailure}`);
-          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING_FAILED', error: startFailure });
+          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=FAILED\nreason=RPC_FAILED`);
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING_FAILED', status: 'failed', error: startFailure });
           continue;
         }
 
         console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=GET_READY\naction=START_BIDDING\nresult=APPLIED`);
-        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING' });
+        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'START_BIDDING', status: 'succeeded' });
         continue; // Processed this lot for this tick
       } else if (lot.status === 'GET_READY') {
         console.error(`[GET_READY_WAIT] lot=${lot.id} now=${now} expiresAt=${getReadyExpiresAt} diff=${getReadyExpiresAt - now}`);
@@ -217,16 +232,20 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
       if (lot.status === 'BIDDING' && timerExpiresAt && now >= timerExpiresAt) {
         // Re-check latest authoritative lot state from DB to prevent a race where a
         // bid extended the timer after this tick loaded the lot.
-        const { data: freshLot } = await supabase
+        const { data: freshLot, error: freshLotError } = await supabase
           .from('auction_lots')
           .select('id, status, timer_expires_at, current_bid')
           .eq('id', lot.id)
           .single();
 
+        if (freshLotError) {
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'READ_LOT_FAILED', status: 'failed', error: freshLotError.message });
+          continue;
+        }
         const freshExpiresAt = freshLot?.timer_expires_at ? new Date(freshLot.timer_expires_at).getTime() : 0;
         if (!freshLot || freshLot.status !== 'BIDDING' || (freshExpiresAt && Date.now() < freshExpiresAt)) {
           console.log(`[TICKER] Skipping finalization of lot ${lot.id} - timer was extended or status changed (expiresAt: ${freshLot?.timer_expires_at})`);
-          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_SKIPPED_TIMER_EXTENDED' });
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_SKIPPED_TIMER_EXTENDED', status: 'skipped' });
           continue;
         }
 
@@ -238,20 +257,32 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
         });
 
         if (data && data.success === false) {
-          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=SKIPPED\nreason=${data.error}`);
-          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT_REJECTED', error: data.error });
+          const rejectionStatus = tickRejectionStatus(data.error);
+
+          console.log(
+            `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=${rejectionStatus === 'skipped' ? 'SKIPPED' : 'FAILED'}\nreason=RPC_REJECTED`
+          );
+
+          actionsTaken.push({
+            auction: auction.id,
+            lot: lot.id,
+            action: 'FINALIZE_LOT_REJECTED',
+            status: rejectionStatus,
+            error: data.error,
+          });
+
           continue;
         }
 
         const finalizeFailure = getAuctionRpcFailure(data, error, 'RPC returned no successful result.');
         if (finalizeFailure) {
-          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=FAILED\nreason=${finalizeFailure}`);
-          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT_FAILED', error: finalizeFailure });
+          console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=FAILED\nreason=RPC_FAILED`);
+          actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT_FAILED', status: 'failed', error: finalizeFailure });
           continue;
         }
 
         console.log(`\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nphase=BIDDING\naction=FINALIZE\nresult=APPLIED`);
-        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT' });
+        actionsTaken.push({ auction: auction.id, lot: lot.id, action: 'FINALIZE_LOT', status: 'succeeded' });
         continue; // Processed this lot for this tick
       }
 
@@ -389,9 +420,9 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
                 `rivalAgg=${brainState.beliefs.rivalAggression.toFixed(2)}`
               );
             }
-          } catch (brainErr) {
+          } catch {
             // FAIL-SAFE: Brain state failure must NEVER stop the auction tick
-            console.error(`[BOT BRAIN ERROR] auction=${auction.id} bot=${bot.id}`, brainErr);
+            console.error(`[BOT BRAIN ERROR] auction=${auction.id} bot=${bot.id}`);
           }
         }
 
@@ -456,6 +487,7 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
               lot: lot.id,
               lotIndex: lot.lot_index,
               action: 'BOT_BID',
+              status: 'succeeded',
               team: bid.teamId,
               proposedAmount: bid.nextBidAmount,
               acceptedAmount: acceptedAmount,
@@ -465,13 +497,14 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
             });
           } else if (data && data.success === false) {
             console.error(
-              `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nlotIndex=${lot.lot_index}\nphase=BIDDING\naction=BOT_BID\nteam=${bid.teamId}\nproposedAmount=${bid.nextBidAmount}\nresult=REJECTED\nreason=${rpcError}`
+              `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nlotIndex=${lot.lot_index}\nphase=BIDDING\naction=BOT_BID\nteam=${bid.teamId}\nproposedAmount=${bid.nextBidAmount}\nresult=REJECTED\nreason=RPC_REJECTED`
             );
             actionsTaken.push({
               auction: auction.id,
               lot: lot.id,
               lotIndex: lot.lot_index,
               action: 'BOT_BID_REJECTED',
+              status: tickRejectionStatus(rpcError),
               team: bid.teamId,
               proposedAmount: bid.nextBidAmount,
               result: 'REJECTED',
@@ -479,13 +512,14 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
             });
           } else {
             console.error(
-              `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nlotIndex=${lot.lot_index}\nphase=BIDDING\naction=BOT_BID\nteam=${bid.teamId}\nproposedAmount=${bid.nextBidAmount}\nresult=FAILED\nreason=${rpcError || 'RPC did not confirm accepted amount'}`
+              `\nAUCTION_TICK\nauction=${auction.id}\nlot=${lot.id}\nlotIndex=${lot.lot_index}\nphase=BIDDING\naction=BOT_BID\nteam=${bid.teamId}\nproposedAmount=${bid.nextBidAmount}\nresult=FAILED\nreason=RPC_FAILED`
             );
             actionsTaken.push({
               auction: auction.id,
               lot: lot.id,
               lotIndex: lot.lot_index,
               action: 'BOT_BID_FAILED',
+              status: 'failed',
               team: bid.teamId,
               proposedAmount: bid.nextBidAmount,
               result: 'FAILED',
@@ -497,10 +531,12 @@ export async function executeAuctionTick(supabase: any): Promise<TickResult> {
           break;
         }
       }
+    } catch {
+      actionsTaken.push({ auction: auction.id, action: 'PROCESS_AUCTION_FAILED', status: 'failed', error: 'Auction processing failed.' });
     } finally {
       activeAuctionTicks.delete(auction.id);
     }
   }
 
-  return { actions: actionsTaken };
+  return tickResult(actionsTaken);
 }

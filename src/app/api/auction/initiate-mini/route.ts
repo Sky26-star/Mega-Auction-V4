@@ -39,7 +39,9 @@ export async function POST(request: Request) {
 
     const rpcFailure = getAuctionRpcFailure(data, error, 'RPC returned no successful result.');
     if (rpcFailure) {
-      console.error('Error in v3_initiate_mini_auction RPC:', error);
+      console.error('Mini-auction RPC failed:', {
+        code: error?.code ?? 'RPC_REJECTED',
+      });
       if (!error && data && typeof data === 'object' && !Array.isArray(data)) {
         const rpcErrorCode = typeof data.error === 'string' ? data.error : rpcFailure;
         if (rpcErrorCode === 'ERR_UNAUTHORIZED') {
@@ -53,7 +55,7 @@ export async function POST(request: Request) {
         }
       }
       return NextResponse.json(
-        { success: false, error: rpcFailure },
+        { success: false, error: 'Mini-auction request failed' },
         { status: error ? 500 : (!data || typeof data !== 'object' || Array.isArray(data) ? 502 : 400) }
       );
     }

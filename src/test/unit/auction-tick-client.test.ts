@@ -1,9 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getAuctionTickClientConfig, requestAuctionTick } from '@/lib/auction/tick-client';
+import { isTickResult, tickResult } from '@/lib/auction/tick-result';
 
 const secret = 'unit-test-auction-tick-secret'.padEnd(48, 'k');
 
 describe('authenticated auction tick client', () => {
+  it('validates explicit failure counts and outcomes instead of action suffixes', () => {
+    expect(isTickResult(tickResult([{ action: 'CUSTOM_ACTION', status: 'failed' }]))).toBe(true);
+    expect(isTickResult({ schemaVersion: 1, success: true, failureCount: 0, actions: [{ action: 'CUSTOM_ACTION', status: 'failed' }] })).toBe(false);
+    expect(isTickResult({ success: true, actions: [] })).toBe(false);
+    expect(isTickResult({ schemaVersion: 1, success: true, failureCount: 0, actions: [{ action: 'X' }] })).toBe(false);
+  });
+
+  it('uses a separate bypass header on a fixed HTTPS Vercel endpoint without following a redirect', async () => {
+    const bypass = 'test-only-distinct-bypass';
+    const config = getAuctionTickClientConfig({ AUCTION_TICK_URL: 'https://auction.vercel.app/api/auction/tick',
+      AUCTION_TICK_SECRET: secret, AUCTION_TICK_VERCEL_BYPASS_SECRET: bypass });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { location: 'https://untrusted.invalid' } }));
+    await expect(requestAuctionTick(config, fetchMock)).rejects.toThrow('HTTP 302');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual', headers: {
+      'x-auction-tick-secret': secret, 'x-vercel-protection-bypass': bypass } });
+  });
+
+  it.each(['http://127.0.0.1:3000/api/auction/tick', 'https://untrusted.invalid/api/auction/tick'])('refuses bypass credentials for %s', url => {
+    expect(() => getAuctionTickClientConfig({ AUCTION_TICK_URL: url, AUCTION_TICK_SECRET: secret,
+      AUCTION_TICK_VERCEL_BYPASS_SECRET: 'separate-test-credential' })).toThrow('Vercel bypass');
+  });
+
+  it.each(['<html>Vercel login</html>', JSON.stringify({ success: true, actions: [] }),
+    JSON.stringify({ schemaVersion: 1, success: true, failureCount: 0, actions: [{ action: 'X', status: 'failed' }] })])('refuses a false healthy response: %s', async payload => {
+    await expect(requestAuctionTick({ url: 'https://auction.example/api/auction/tick', secret },
+      vi.fn().mockResolvedValue(new Response(payload, { status: 200 })))).rejects.toThrow('Invalid auction tick');
+  });
+
+  it('treats an explicit partial failure in HTTP 200 as retryable failure', async () => {
+    await expect(requestAuctionTick({ url: 'https://auction.example/api/auction/tick', secret },
+      vi.fn().mockResolvedValue(Response.json(tickResult([{ action: 'RESUME', status: 'failed' }]))))).rejects.toThrow('HTTP 503');
+  });
   it('requires a configured secret', () => {
     expect(() => getAuctionTickClientConfig({ AUCTION_TICK_URL: 'https://auction.example/api/auction/tick' }))
       .toThrow('AUCTION_TICK_SECRET');
@@ -41,7 +75,7 @@ describe('authenticated auction tick client', () => {
   });
 
   it('sends the server credential only in the dedicated request header', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ schemaVersion: 1, success: true, failureCount: 0, actions: [] }) });
 
     await requestAuctionTick({
       url: 'https://auction.example/api/auction/tick',
@@ -52,7 +86,7 @@ describe('authenticated auction tick client', () => {
       method: 'POST',
       headers: { 'x-auction-tick-secret': secret },
       cache: 'no-store',
-      redirect: 'error',
+      redirect: 'manual',
     }));
   });
 

@@ -86,6 +86,26 @@ jobs:
 
       - name: Fresh Project Grants and Realtime Compatibility
         run: |
+          set -euo pipefail
+          container=""
+
+          cleanup_fresh_ci() {
+            local result=$?
+            trap - EXIT
+            set +e
+
+            if [[ "$container" =~ ^[0-9a-f]{12,64}$ ]]; then
+              label=$(docker inspect --format '{{ index .Config.Labels "mega-auction.purpose" }}' "$container" 2>/dev/null)
+              if [ "$label" = "fresh-project-validation-ci" ]; then
+                docker rm -f "$container" >/dev/null 2>&1 || true
+              fi
+            fi
+
+            exit "$result"
+          }
+
+          trap cleanup_fresh_ci EXIT
+
           container=$(docker run --detach --network none \
             --label mega-auction.purpose=fresh-project-validation-ci \
             --tmpfs /var/lib/postgresql/data:rw,size=768m \
@@ -104,6 +124,67 @@ jobs:
             exit 1
           fi
           node scripts/check-fresh-project-database.mjs --container "$container"
+
+      - name: Native Scheduler Recovery and Real Failure Injection
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/build-scheduler-migration.mjs
+
+          container=""
+          cron_container=""
+
+          cleanup_owned_ci_container() {
+            local id="$1"
+            local expected="$2"
+
+            if [[ "$id" =~ ^[0-9a-f]{12,64}$ ]]; then
+              label=$(docker inspect --format '{{ index .Config.Labels "mega-auction.purpose" }}' "$id" 2>/dev/null)
+              if [ "$label" = "$expected" ]; then
+                docker rm -f "$id" >/dev/null 2>&1 || true
+              fi
+            fi
+          }
+
+          cleanup_native_scheduler_ci() {
+            local result=$?
+            trap - EXIT
+            set +e
+
+            if [ -z "$cron_container" ] && [ -f native-cron-results.log ]; then
+              cron_container=$(sed -n 's/^Cron validation container: //p' native-cron-results.log | tail -n 1)
+            fi
+
+            cleanup_owned_ci_container "$cron_container" "isolated-cron-validation"
+            cleanup_owned_ci_container "$container" "isolated-action-ledger"
+
+            exit "$result"
+          }
+
+          trap cleanup_native_scheduler_ci EXIT
+
+          container=$(docker run --detach --network none \
+            --label mega-auction.purpose=isolated-action-ledger \
+            --tmpfs /var/lib/postgresql/data:rw,size=768m \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            postgres:17-alpine postgres -p 55325 -c wal_level=logical)
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" pg_isready -U postgres -p 55325 >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          node scripts/validate-scheduler-database.mjs "$container" | tee native-scheduler-results.log
+          fixture=$(sed -n 's/^VALIDATED_FIXTURE=//p' native-scheduler-results.log)
+          test -n "$fixture"
+          docker pull public.ecr.aws/supabase/postgres:17.6.1.155
+          node scripts/validate-scheduler-cron.mjs "$container" "$fixture" | tee native-cron-results.log
+          cron_container=$(sed -n 's/^Cron validation container: //p' native-cron-results.log)
+          test -n "$cron_container"
+          node scripts/check-scheduler-restart.mjs "$cron_container"
 
       - name: Full Unit & Regression Suite (Vitest)
         run: npm run test:run -- --maxWorkers=2

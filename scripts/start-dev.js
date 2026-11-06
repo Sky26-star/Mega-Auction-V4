@@ -215,6 +215,14 @@ async function runDevRunner(options = {}) {
       return normalizedExitCode(first.outcome);
     }
 
+    if (options.webOnly ?? process.argv.includes('--web-only')) {
+      log.log('[DEV-RUNNER] Web-only mode: no Node auction worker will be started.');
+      const outcome = await Promise.race([nextOutcome, signalPromise]);
+      stopping = true;
+      if (!outcome.handledByRunner) await terminateProcessTree(nextProcess, { platform, spawnImpl });
+      return normalizedExitCode(outcome);
+    }
+
     log.log('[DEV-RUNNER] Next.js tick route is ready; starting the serialized auction worker.');
     tickerProcess = spawnImpl(nodeExecutable, [require.resolve('tsx/cli'), 'scripts/worker.ts'], {
       stdio: 'inherit',

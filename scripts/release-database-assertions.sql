@@ -84,14 +84,14 @@ UPDATE public.auction_lots SET status='GET_READY',get_ready_expires_at=now()-int
 SELECT pg_temp.release_assert(auction_private.has_due_work(), 'get-ready expiry is detected');
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='requested', 'due timer queues authenticated request');
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='awaiting_response', 'pending request cannot overlap');
-SELECT pg_temp.release_assert((SELECT count(*)=1 FROM net.release_requests WHERE headers->>'x-auction-tick-secret'=repeat('x',64) AND timeout_milliseconds=10000), 'HTTP carries shared secret and timeout');
+SELECT pg_temp.release_assert((SELECT count(*)=1 FROM net.release_requests WHERE headers->>'x-auction-tick-secret'=repeat('x',64) AND timeout_milliseconds=25000), 'HTTP carries shared secret and timeout');
 INSERT INTO net._http_response SELECT request_id,503,false,NULL,'{"success":false}' FROM auction_private.scheduler_state;
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='retrying', 'temporary HTTP failure retries');
 SELECT pg_temp.release_assert((SELECT enabled AND failures=1 FROM auction_private.scheduler_state), '503 does not permanently disable auction');
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='backoff', 'failed request observes backoff');
 UPDATE auction_private.scheduler_state SET next_attempt_at=now();
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='requested', 'retry resumes after backoff');
-INSERT INTO net._http_response SELECT request_id,200,false,NULL,'{"success":true,"actions":[]}' FROM auction_private.scheduler_state;
+INSERT INTO net._http_response SELECT request_id,200,false,NULL,'{"schemaVersion":1,"success":true,"failureCount":0,"actions":[]}' FROM auction_private.scheduler_state;
 UPDATE public.auction_lots SET get_ready_expires_at=now()+interval '1 minute' WHERE status='GET_READY';
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='idle', 'healthy response clears pending request');
 SELECT pg_temp.release_assert((SELECT request_id IS NULL AND failures=0 FROM auction_private.scheduler_state), 'successful recovery resets failure counter');
@@ -105,3 +105,77 @@ SELECT pg_temp.release_assert(auction_private.dispatch_tick()='requested', 'mini
 INSERT INTO net._http_response SELECT request_id,401,false,NULL,'{"success":false}' FROM auction_private.scheduler_state;
 SELECT pg_temp.release_assert(auction_private.dispatch_tick()='configuration_error', 'invalid scheduler credential disables dispatch');
 SELECT pg_temp.release_assert((SELECT NOT enabled FROM auction_private.scheduler_state), 'unauthorized polling stops');
+
+-- Explicit response contracts: redirects, followed login HTML, legacy payloads,
+-- missing outcome fields and contradictory success flags must fail closed.
+DO $responses$
+DECLARE fixture record; response_id bigint := 10000;
+BEGIN
+  FOR fixture IN SELECT * FROM (VALUES
+    (302, NULL::text),
+    (307, NULL::text),
+    (200, '<html>Vercel login</html>'),
+    (200, '{"success":true,"actions":[]}'),
+    (200, '{"schemaVersion":1,"success":true,"failureCount":0,"actions":[{"action":"RESUME","status":"failed"}]}'),
+    (200, '{"schemaVersion":1,"success":true,"failureCount":0,"actions":[{"action":"X"}]}'),
+    (200, '{"schemaVersion":1,"success":true,"failureCount":0,"actions":[null]}'),
+    (403, '{"success":false}')
+  ) cases(code, payload) LOOP
+    response_id := response_id + 1;
+    UPDATE auction_private.scheduler_state SET enabled=true, failures=0,
+      request_id=response_id, requested_at=now(), next_attempt_at=now();
+    INSERT INTO net._http_response VALUES(response_id,fixture.code,false,NULL,fixture.payload);
+    PERFORM pg_temp.release_assert(auction_private.dispatch_tick()='configuration_error', 'invalid HTTP/response contract opens configuration circuit');
+    PERFORM pg_temp.release_assert((SELECT NOT enabled AND request_id IS NULL FROM auction_private.scheduler_state), 'configuration circuit disables without another request');
+  END LOOP;
+END;
+$responses$;
+
+-- A non-suffixed action failure must never be called healthy, even in HTTP 200.
+UPDATE auction_private.scheduler_state SET enabled=true, failures=0, request_id=11000,requested_at=now(),next_attempt_at=now();
+INSERT INTO net._http_response VALUES(11000,200,false,NULL,'{"schemaVersion":1,"success":false,"failureCount":1,"actions":[{"action":"CUSTOM","status":"failed"}]}');
+SELECT pg_temp.release_assert(auction_private.dispatch_tick()='retrying', 'explicit failure count controls retry');
+
+-- The response window exceeds the 25s HTTP timeout, which exceeds the 20s
+-- function budget. A lost response is retried only after the reconciliation window.
+UPDATE auction_private.scheduler_state SET enabled=true, failures=0, request_id=12000,requested_at=now()-interval '26 seconds',next_attempt_at=now();
+SELECT pg_temp.release_assert(auction_private.dispatch_tick()='awaiting_response', 'pending transport has reconciliation headroom');
+UPDATE auction_private.scheduler_state SET requested_at=now()-interval '31 seconds';
+SELECT pg_temp.release_assert(auction_private.dispatch_tick()='retrying', 'lost HTTP response is recoverable');
+
+-- Five consecutive failures stop permanently until reviewed by the operator.
+DO $circuit$
+DECLARE attempt integer;
+BEGIN
+  UPDATE auction_private.scheduler_state SET enabled=true, failures=0;
+  FOR attempt IN 1..5 LOOP
+    UPDATE auction_private.scheduler_state SET request_id=13000+attempt, requested_at=now(), next_attempt_at=now();
+    INSERT INTO net._http_response VALUES(13000+attempt,503,false,NULL,'{"success":false}');
+    PERFORM pg_temp.release_assert(auction_private.dispatch_tick()=CASE WHEN attempt=5 THEN 'retry_exhausted' ELSE 'retrying' END, 'bounded retry outcome');
+  END LOOP;
+  PERFORM pg_temp.release_assert((SELECT NOT enabled AND failures=5 FROM auction_private.scheduler_state), 'retry exhaustion disables dispatcher');
+  PERFORM pg_temp.release_assert(auction_private.dispatch_tick()='disabled', 'circuit never auto-restarts');
+END;
+$circuit$;
+
+-- Never transmit a Vercel bypass secret using pg_net's redirect-following HTTP.
+INSERT INTO vault.decrypted_secrets VALUES ('mega_auction_vercel_bypass_secret','disposable-fixture-not-a-real-credential');
+UPDATE auction_private.scheduler_state SET enabled=true, failures=0,request_id=NULL,next_attempt_at=now();
+SELECT pg_temp.release_assert(auction_private.dispatch_tick()='unsupported_protected_transport', 'unsafe bypass configuration fails before queuing HTTP');
+SELECT pg_temp.release_assert((SELECT NOT enabled FROM auction_private.scheduler_state), 'unsupported transport stays disabled');
+DELETE FROM vault.decrypted_secrets WHERE name='mega_auction_vercel_bypass_secret';
+
+-- A queue failure must also consume the retry budget instead of throwing forever.
+CREATE OR REPLACE FUNCTION net.http_post(url text, body jsonb, headers jsonb, timeout_milliseconds integer) RETURNS bigint
+LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'disposable queue failure'; END; $$;
+UPDATE auction_private.scheduler_state SET enabled=true, failures=0,request_id=NULL,next_attempt_at=now();
+DO $enqueue$
+DECLARE attempt integer;
+BEGIN
+  FOR attempt IN 1..5 LOOP
+    UPDATE auction_private.scheduler_state SET next_attempt_at=now();
+    PERFORM pg_temp.release_assert(auction_private.dispatch_tick()=CASE WHEN attempt=5 THEN 'retry_exhausted' ELSE 'enqueue_failed' END, 'queue failures consume bounded budget');
+  END LOOP;
+  PERFORM pg_temp.release_assert((SELECT NOT enabled AND failures=5 FROM auction_private.scheduler_state), 'queue failure circuit stays disabled');
+END;
+$enqueue$;
