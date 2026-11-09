@@ -1,0 +1,111 @@
+
+name: Mega Auction Scheduler Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.SCHEDULER_MONITOR_DATABASE_URL }}
+      PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+      EXPECT_ENABLED: ${{ vars.SCHEDULER_EXPECT_ENABLED }}
+
+    steps:
+      - name: Install PostgreSQL client
+        run: npm install --prefix "$RUNNER_TEMP/monitor" --no-audit --no-fund --ignore-scripts pg@8.23.0
+
+      - name: Check scheduler health and report
+        shell: bash
+        run: |
+          node <<'JS'
+          const { Client } = require(process.env.RUNNER_TEMP + '/monitor/node_modules/pg');
+
+          (async () => {
+            let healthy = false;
+            let client;
+
+            try {
+              const db = new URL(process.env.DATABASE_URL);
+              if (!['postgres:', 'postgresql:'].includes(db.protocol) || db.search || db.hash) {
+                throw Error('INVALID_DB_URL');
+              }
+
+              client = new Client({
+                connectionString: process.env.DATABASE_URL,
+                ssl: { rejectUnauthorized: true },
+                connectionTimeoutMillis: 5000,
+                query_timeout: 5000
+              });
+
+              await client.connect();
+
+              const role = await client.query(
+                "SELECT rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole AS elevated FROM pg_roles WHERE rolname = session_user"
+              );
+              if (role.rows[0]?.elevated !== false) {
+                throw Error('UNSAFE_LOGIN');
+              }
+
+              await client.query('SET ROLE auction_monitor');
+              await client.query('SET default_transaction_read_only = on');
+
+              const result = await client.query(
+                'SELECT public.auction_scheduler_health() AS health'
+              );
+
+              const h = result.rows[0]?.health;
+              const expected = process.env.EXPECT_ENABLED === 'true';
+
+              healthy =
+                h?.schemaVersion === 1 &&
+                h.owner === 'DATABASE' &&
+                h.enabled === expected &&
+                h.circuit === (expected ? 'CLOSED' : 'OPEN') &&
+                h.stale === false &&
+                h.unknownClaims === 0 &&
+                h.quarantinedActions === 0 &&
+                h.undeliveredAlerts === 0;
+
+              console.log(healthy ? 'Health check PASS' : 'Health check FAILED');
+            } catch {
+              console.error('Database health check failed');
+            } finally {
+              if (client) await client.end().catch(() => {});
+            }
+
+            try {
+              const ping = new URL(process.env.PING_URL);
+              if (ping.protocol !== 'https:' ||
+                  ping.hostname !== 'hc-ping.com' ||
+                  ping.username || ping.password || ping.search || ping.hash) {
+                throw Error('INVALID_PING_URL');
+              }
+
+              const url = ping.toString().replace(/\/$/, '') +
+                (healthy ? '' : '/fail');
+
+              const response = await fetch(url, {
+                method: 'POST',
+                redirect: 'error',
+                signal: AbortSignal.timeout(8000)
+              });
+
+              if (!response.ok) throw Error('PING_FAILED');
+            } catch {
+              console.error('Healthchecks notification failed');
+              process.exitCode = 1;
+            }
+
+            if (!healthy) process.exitCode = 1;
+          })().catch(() => {
+            process.exitCode = 1;
+          });
+          JS
