@@ -27,14 +27,6 @@ describe('Behavior B14: Late Entry Reversal', () => {
     is_overseas: false,
     image_url: null,
     rating: 85,
-    matches: 80,
-    runs: 2800,
-    batting_average: 36,
-    strike_rate: 138,
-    boundaries: 350,
-    hundreds: 1,
-    fifties: 18,
-    highest_score: 104,
   };
 
   // Bot franchise: 4000L remaining purse, 5 players bought (20 slots remaining)
@@ -476,11 +468,22 @@ describe('Behavior B14: Late Entry Reversal', () => {
       maxOverseas: 8,
     };
 
+    const currentLotWithStats: V3Player & { rating?: number } = {
+      ...currentLot,
+      category: 'A',
+      rating: 88,
+      matches: 80,
+      runs: 3000,
+      batting_average: 35,
+      strike_rate: 140,
+      boundaries: 350,
+    };
+
     // --- BEFORE: Early auction with plentiful future pool ---
     const evidenceEarly: BotDecisionEvidence[] = [];
     const bidsEarly = evaluateBotsForLot(
       [botTeam],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       'other-team',
@@ -499,7 +502,7 @@ describe('Behavior B14: Late Entry Reversal', () => {
     const evidenceLate: BotDecisionEvidence[] = [];
     const bidsLate = evaluateBotsForLot(
       [botTeam],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       'other-team',
@@ -529,8 +532,8 @@ describe('Behavior B14: Late Entry Reversal', () => {
       TV: evidenceLate[0]?.tv,
     });
 
-    // 1. BEFORE: Bot rationally drops to preserve purse
-    expect(evidenceEarly[0]?.decision).toBe('DROP');
+    // 1. BEFORE: Bot temporarily passes to preserve purse and can reconsider later.
+    expect(evidenceEarly[0]?.decision).toBe('PASS');
     expect(evidenceEarly[0]?.actionReason).toBe('EARLY_RESOURCE_PRESERVATION');
     expect(evidenceEarly[0]?.pacingState).toBe('EARLY_PRESERVATION');
     expect(bidsEarly.length).toBe(0);

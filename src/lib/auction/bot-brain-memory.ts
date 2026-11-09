@@ -1,4 +1,4 @@
-// src/lib/auction/bot-brain-memory.ts
+﻿// src/lib/auction/bot-brain-memory.ts
 
 export interface BidObservation {
   highestBid: number;
@@ -256,3 +256,6 @@ export function syncBotMemoryWithState(
 
   return memory;
 }
+
+
+export const __globalBotCache: Record<string, any> = ((globalThis as any).__globalBotCache ??= {});

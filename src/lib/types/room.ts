@@ -1,7 +1,7 @@
 // src/lib/types/room.ts
 // Phase 5 Room & Team Management Types for Mega Auction V1
 
-export type RoomStatus = 'OPEN' | 'LOCKED' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED';
+export type RoomStatus = 'OPEN' | 'LOBBY' | 'LOCKED' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED';
 export type ParticipantRole = 'HOST' | 'MEMBER' | 'SPECTATOR';
 export type AuctionStatus = 'LOBBY' | 'READY' | 'STARTING' | 'IN_PROGRESS' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
 
@@ -37,6 +37,23 @@ export interface Room {
   player_set_name?: string;
   participant_count?: number;
   auction_id?: string;
+}
+
+/** Minimal room fields returned by the authenticated invite-code preview RPC. */
+export type RoomPreviewSettings = Pick<
+  RoomSettings,
+  'default_purse' | 'timer_duration_seconds' | 'max_squad_size' | 'max_overseas'
+>;
+
+export interface RoomPreview {
+  id: string;
+  code: string;
+  name: string;
+  host_id: string;
+  status: RoomStatus;
+  settings: RoomPreviewSettings;
+  player_set_name: string | null;
+  host_profile: NonNullable<Room['host_profile']> | null;
 }
 
 export interface RoomParticipant {

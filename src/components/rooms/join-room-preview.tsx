@@ -2,7 +2,7 @@
 
 // src/components/rooms/join-room-preview.tsx
 import React from 'react';
-import type { Room } from '@/lib/types/room';
+import type { RoomPreview } from '@/lib/types/room';
 import {
   Gavel,
   Database,
@@ -23,7 +23,7 @@ export type VerificationState = 'IDLE' | 'VERIFYING' | 'FOUND' | 'NOT_FOUND' | '
 
 interface JoinRoomPreviewProps {
   code: string;
-  room: Room | null;
+  room: RoomPreview | null;
   verificationState: VerificationState;
   errorMessage?: string | null;
 }

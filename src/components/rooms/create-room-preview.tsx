@@ -2,6 +2,7 @@
 
 // src/components/rooms/create-room-preview.tsx
 import React, { useState, useEffect } from 'react';
+import { AUCTION_BOTS_ENABLED } from '@/lib/feature-flags';
 import type { PlayerSet } from '@/lib/types/player-set';
 import {
   Gavel,
@@ -206,17 +207,19 @@ export function CreateRoomPreview({
         </div>
 
         {/* Bot Opponents */}
-        <div className="flex items-center justify-between text-xs pt-1 border-t border-[#2A312D]/60">
-          <span className="text-[#9CA6A0] font-semibold flex items-center space-x-1.5">
-            <Cpu className="w-3.5 h-3.5 text-[#E4B93F]" />
-            <span>BOT OPPONENTS:</span>
-          </span>
-          <span className="font-bold text-[#F3F4F1] bg-[#181E1A] px-2 py-0.5 rounded border border-[#2A312D]">
-            <AnimatedValue valueKey={`${enableBots}-${botCount}`}>
-              {enableBots && botCount > 0 ? `${botCount} AI BOTS (${1 + botCount}/10 MANAGERS)` : 'DISABLED (1/10 MANAGERS)'}
-            </AnimatedValue>
-          </span>
-        </div>
+        {AUCTION_BOTS_ENABLED && (
+          <div className="flex items-center justify-between text-xs pt-1 border-t border-[#2A312D]/60">
+            <span className="text-[#9CA6A0] font-semibold flex items-center space-x-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[#E4B93F]" />
+              <span>BOT OPPONENTS:</span>
+            </span>
+            <span className="font-bold text-[#F3F4F1] bg-[#181E1A] px-2 py-0.5 rounded border border-[#2A312D]">
+              <AnimatedValue valueKey={`${enableBots}-${botCount}`}>
+                {enableBots && botCount > 0 ? `${botCount} AI BOTS (${1 + botCount}/10 MANAGERS)` : 'DISABLED (1/10 MANAGERS)'}
+              </AnimatedValue>
+            </span>
+          </div>
+        )}
 
       </div>
 

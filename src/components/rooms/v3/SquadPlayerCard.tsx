@@ -1,46 +1,45 @@
-import React from 'react';
-import { V3SquadPlayer } from '@/hooks/useV3Squad';
+import type { V3SquadPlayer } from '@/hooks/useV3Squad';
+import { MoneyAmount } from './auction-report-ui';
 
-interface SquadPlayerCardProps {
-  squadPlayer: V3SquadPlayer;
-}
-
-export function SquadPlayerCard({ squadPlayer }: SquadPlayerCardProps) {
+export function SquadPlayerCard({ squadPlayer }: { squadPlayer: V3SquadPlayer }) {
   const { player, winning_bid } = squadPlayer;
-
+  const initials = player.name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('');
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-[#2A312D] bg-[#141917] p-5 shadow-xl flex flex-col gap-4 hover:border-[#C9A227]/50 hover:bg-[#181E1A] hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#C9A227]/10 transition-all duration-300">
-      <div className="absolute inset-0 bg-gradient-to-br from-[#C9A227]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-      {/* Top Header */}
-      <div className="flex justify-between items-start gap-4">
-        <div className="flex flex-col">
-          <h3 className="text-xl sm:text-2xl font-black uppercase text-[#F3F4F1] font-display tracking-tight leading-none mb-1">
-            {player.name}
-          </h3>
-          <p className="text-xs font-mono font-bold text-[#9CA6A0] uppercase tracking-widest">
-            {player.role} • {player.country}
-          </p>
-        </div>
-
-        {/* Acquired Price Badge */}
-        <div className="shrink-0 text-right bg-[#0B0F0D] border border-[#C9A227]/30 px-3 py-1.5 rounded-lg group-hover:border-[#C9A227] transition-colors">
-          <p className="text-[9px] font-mono font-bold text-[#C9A227] uppercase tracking-widest leading-none mb-1">ACQUIRED</p>
-          <p className="text-sm font-mono-numbers font-black text-[#F3F4F1] leading-none">
-            ₹{winning_bid} <span className="text-[10px] text-[#9CA6A0]">L</span>
-          </p>
-        </div>
-      </div>
-
-      {/* Bottom Meta */}
-      <div className="flex flex-wrap gap-2 mt-auto pt-2">
-        <span className="px-2 py-1 rounded bg-[#0B0F0D] border border-[#2A312D] text-[10px] font-mono font-bold text-[#9CA6A0]">
-          SET: {player.category}
+    <article className="flex min-w-0 flex-col rounded-2xl border border-[#2A312D] bg-[#141917] p-4 transition-colors hover:border-[#C9A227]/50">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <span
+          aria-hidden="true"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#C9A227]/20 bg-[#C9A227]/10 font-display text-lg text-[#E4B93F]"
+        >
+          {initials}
         </span>
-        <span className="px-2 py-1 rounded bg-[#0B0F0D] border border-[#2A312D] text-[10px] font-mono font-bold text-[#9CA6A0]">
-          {player.is_overseas ? 'OVERSEAS' : 'DOMESTIC'}
+        <span
+          className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${player.is_overseas ? 'bg-[#C9A227]/10 text-[#E4B93F]' : 'bg-[#242E27] text-[#ABBFAF]'}`}
+        >
+          {player.is_overseas ? 'Overseas' : 'Domestic'}
         </span>
       </div>
-    </div>
+      <h4 className="break-words text-xl font-semibold uppercase leading-tight">{player.name}</h4>
+      <p className="mb-4 mt-1 text-xs leading-relaxed text-[#9CA6A0]">
+        {player.country || 'India'} · {player.role.replaceAll('_', ' ')}
+      </p>
+      <div className="mt-auto flex flex-wrap items-end justify-between gap-3 border-t border-[#2A312D] pt-3">
+        <div>
+          <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-[#9CA6A0]">
+            Acquired for
+          </p>
+          <MoneyAmount lakhs={winning_bid} className="text-lg font-semibold text-[#E4B93F]" />
+        </div>
+        {player.category && (
+          <span className="rounded-md border border-[#2A312D] px-2 py-1 text-[10px] text-[#9CA6A0]">
+            Set {player.category}
+          </span>
+        )}
+      </div>
+    </article>
   );
 }

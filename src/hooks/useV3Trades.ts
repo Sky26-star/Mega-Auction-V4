@@ -9,6 +9,7 @@ import type {
   TradeProposalInput,
   TradeFairnessResult,
 } from '@/lib/trade/trade-types';
+import { getBotProposalHistory } from '@/lib/trade/bot-cycle-policy';
 
 export function useV3Trades(auctionId: string | null, currentTeamId?: string | null) {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
@@ -74,6 +75,9 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
 
       if (seq !== fetchSeqRef.current) return;
 
+      if (teamsRes.error) throw teamsRes.error;
+      if (playersRes.error) throw playersRes.error;
+
       const teamMap = new Map<string, V3Team>();
       (teamsRes.data || []).forEach((tm: any) => teamMap.set(tm.id, tm));
 
@@ -99,6 +103,7 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
       if (seq !== fetchSeqRef.current) return;
       console.error('Error fetching trades:', err);
       if (mountedRef.current) {
+        setTrades([]);
         setError(err.message || 'Failed to fetch trades');
       }
     } finally {
@@ -173,7 +178,6 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
       }
 
       setSubmitting(true);
-      setError(null);
 
       try {
         const { data, error: rpcErr } = await supabase.rpc('v3_propose_trade', {
@@ -197,7 +201,6 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
       } catch (err: any) {
         console.error('Error proposing trade:', err);
         const errMsg = err.message || 'Failed to submit proposal';
-        setError(errMsg);
         return { success: false, error: errMsg };
       } finally {
         if (mountedRef.current) {
@@ -216,7 +219,6 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
       notes?: string
     ): Promise<{ success: boolean; error?: string }> => {
       setSubmitting(true);
-      setError(null);
 
       try {
         const { data, error: rpcErr } = await supabase.rpc('v3_respond_trade', {
@@ -235,7 +237,6 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
       } catch (err: any) {
         console.error(`Error responding to trade (${action}):`, err);
         const errMsg = err.message || `Failed to ${action.toLowerCase()} trade`;
-        setError(errMsg);
         return { success: false, error: errMsg };
       } finally {
         if (mountedRef.current) {
@@ -293,7 +294,7 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
 
   // Filtered views
   const activeTrades = useMemo(
-    () => trades.filter(t => t.status === 'PENDING' || t.status === 'COUNTERED'),
+    () => trades.filter(t => t.status === 'PENDING'),
     [trades]
   );
 
@@ -301,11 +302,13 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
     () =>
       trades.filter(
         t =>
-          t.status === 'ACCEPTED' ||
-          t.status === 'REJECTED' ||
-          t.status === 'CANCELLED' ||
-          t.status === 'EXPIRED'
+          t.status === 'ACCEPTED'
       ),
+    [trades]
+  );
+
+  const botProposalHistory = useMemo(
+    () => getBotProposalHistory(trades),
     [trades]
   );
 
@@ -323,6 +326,7 @@ export function useV3Trades(auctionId: string | null, currentTeamId?: string | n
     trades,
     activeTrades,
     completedTrades,
+    botProposalHistory,
     receivedOffers,
     sentOffers,
     loading,

@@ -258,19 +258,60 @@ describe('Phase 7 — Action Decision Engine', () => {
   });
 
   // =========================================================================
-  // TEST 6 — NOT_COMMITTED → PASS
+  // TEST 6 — NOT_COMMITTED + COMPLETE SQUAD → PASS
   // =========================================================================
-  it('TEST 6 — NOT_COMMITTED → PASS', () => {
-    // Even at comfortable headroom price, NOT_COMMITTED leads to PASS
+  it('TEST 6 — NOT_COMMITTED + COMPLETE SQUAD → PASS', () => {
+    // When squad is complete (0 remaining slots), NOT_COMMITTED leads to rational PASS
     const ctx = createDecisionContext({
       nextRequiredBid: 400,
       maximumBid: { ...baseMaximumBid, maximumBid: 1000 },
-      teamValue: { ...baseTeamValue, strategicCommitment: 'NOT_COMMITTED' }
+      teamValue: {
+        ...baseTeamValue,
+        strategicCommitment: 'NOT_COMMITTED',
+        factors: {
+          ...baseTeamValue.factors,
+          need: {
+            ...baseTeamValue.factors.need,
+            remainingSquadSlots: 0,
+          },
+        },
+      },
     });
 
     const res = evaluateDecision(ctx);
     expect(res.action).toBe('PASS');
-    expect(res.reason).toContain('not strategically justified');
+    expect(res.reason).toContain('Squad is already complete');
+  });
+
+  // =========================================================================
+  // TEST 6B — NOT_COMMITTED + INCOMPLETE SQUAD → BID (ROSTER DEFICIT RELAXATION)
+  // =========================================================================
+  it('TEST 6B — NOT_COMMITTED + INCOMPLETE SQUAD → BID', () => {
+    // When squad is incomplete and role has a deficit, useful depth player is reconsidered
+    const ctx = createDecisionContext({
+      nextRequiredBid: 400,
+      maximumBid: { ...baseMaximumBid, maximumBid: 1000 },
+      teamValue: {
+        ...baseTeamValue,
+        strategicCommitment: 'NOT_COMMITTED',
+        factors: {
+          ...baseTeamValue.factors,
+          need: {
+            ...baseTeamValue.factors.need,
+            remainingSquadSlots: 10,
+            currentRoleCount: 2,
+            requiredRoleCount: 5,
+          },
+        },
+      },
+    });
+
+    const res = evaluateDecision(ctx);
+    expect(res.action).toBe('BID');
+    if (res.action === 'BID') {
+      expect(res.bidAmount).toBe(400);
+      expect(res.reason).toContain('Roster-deficit continuation');
+    }
   });
 
   // =========================================================================

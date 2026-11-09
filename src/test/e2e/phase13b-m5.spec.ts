@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import {
   createDisposableTestUser,
@@ -15,7 +16,7 @@ async function invokeTick() {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.CRON_SECRET}`
+      'x-auction-tick-secret': process.env.AUCTION_TICK_SECRET || ''
     },
   });
   const data = await res.json();

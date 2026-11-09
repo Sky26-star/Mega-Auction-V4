@@ -3,6 +3,7 @@ import { V3Player, V3PlayerRole } from '@/lib/v3-auction-types';
 
 interface V3PlayerStatsProps {
   player: V3Player;
+  responsive?: boolean;
 }
 
 // Returns true only if the value is a valid number (not null, undefined, or NaN).
@@ -20,15 +21,16 @@ function isValidStr(v: string | null | undefined): v is string {
 interface StatCardProps {
   label: string;
   value: string | number;
+  responsive?: boolean;
 }
 
-function StatCard({ label, value }: StatCardProps) {
+function StatCard({ label, value, responsive = false }: StatCardProps) {
   return (
-    <div className="flex flex-col bg-[#0B0F0D] border border-[#2A312D] rounded-xl p-3 min-w-0">
-      <span className="text-[9px] font-mono font-bold text-[#9CA6A0] uppercase tracking-widest leading-none mb-1.5 truncate">
+    <div className={responsive ? 'flex min-w-0 flex-col rounded-xl border border-[#2A312D] bg-[#0B0F0D] p-2 sm:p-3' : 'flex min-w-0 flex-col rounded-xl border border-[#2A312D] bg-[#0B0F0D] p-3'}>
+      <span className={responsive ? 'mb-1.5 truncate text-xs font-mono font-bold uppercase leading-tight tracking-wider text-[#9CA6A0] sm:text-[9px] sm:leading-none sm:tracking-widest' : 'mb-1.5 truncate text-[9px] font-mono font-bold uppercase leading-none tracking-widest text-[#9CA6A0]'}>
         {label}
       </span>
-      <span className="text-sm font-mono-numbers font-bold text-[#F3F4F1] leading-none tabular-nums truncate">
+      <span className={responsive ? 'truncate text-base font-mono-numbers font-bold leading-tight tabular-nums text-[#F3F4F1] sm:text-sm sm:leading-none' : 'truncate text-sm font-mono-numbers font-bold leading-none tabular-nums text-[#F3F4F1]'}>
         {value}
       </span>
     </div>
@@ -39,23 +41,29 @@ interface StatGroupProps {
   title: string;
   accentClass?: string;
   children: React.ReactNode;
+  responsive?: boolean;
 }
 
-function StatGroup({ title, accentClass = 'text-[#C9A227]', children }: StatGroupProps) {
+function StatGroup({ title, accentClass = 'text-[#C9A227]', children, responsive = false }: StatGroupProps) {
   return (
     <div className="space-y-2">
-      <h4 className={`text-[9px] font-mono font-black uppercase tracking-[0.2em] ${accentClass}`}>
+      <h4 className={`${responsive ? 'text-xs font-mono font-black uppercase tracking-wider sm:text-[9px] sm:tracking-[0.2em]' : 'text-[9px] font-mono font-black uppercase tracking-[0.2em]'} ${accentClass}`}>
         {title}
       </h4>
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      <div className={responsive ? 'grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 sm:grid-cols-4' : 'grid grid-cols-3 gap-2 sm:grid-cols-4'}>
         {children}
       </div>
     </div>
   );
 }
 
-export function V3PlayerStats({ player }: V3PlayerStatsProps) {
+export function V3PlayerStats({ player, responsive = false }: V3PlayerStatsProps) {
   const role: V3PlayerRole = player.role;
+  const withResponsiveStyle = (cards: React.ReactNode[]) => cards.map((card) =>
+    React.isValidElement(card)
+      ? React.cloneElement(card as React.ReactElement<StatCardProps>, { responsive })
+      : card
+  );
 
   // ── BATSMAN ───────────────────────────────────────────────────
   if (role === 'BATSMAN') {
@@ -72,11 +80,11 @@ export function V3PlayerStats({ player }: V3PlayerStatsProps) {
     if (cards.length === 0) return null;
     return (
       <div className="space-y-3 pt-3 border-t border-[#2A312D]/50">
-        <h3 className="text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]">
+        <h3 className={responsive ? 'text-xs font-mono font-black uppercase tracking-wider text-[#9CA6A0] sm:text-[9px] sm:tracking-[0.2em]' : 'text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           Player Stats
         </h3>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-          {cards}
+        <div className={responsive ? 'grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 sm:grid-cols-4' : 'grid grid-cols-3 gap-2 sm:grid-cols-4'}>
+          {withResponsiveStyle(cards)}
         </div>
       </div>
     );
@@ -96,11 +104,11 @@ export function V3PlayerStats({ player }: V3PlayerStatsProps) {
     if (cards.length === 0) return null;
     return (
       <div className="space-y-3 pt-3 border-t border-[#2A312D]/50">
-        <h3 className="text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]">
+        <h3 className={responsive ? 'text-xs font-mono font-black uppercase tracking-wider text-[#9CA6A0] sm:text-[9px] sm:tracking-[0.2em]' : 'text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           Player Stats
         </h3>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-          {cards}
+        <div className={responsive ? 'grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 sm:grid-cols-4' : 'grid grid-cols-3 gap-2 sm:grid-cols-4'}>
+          {withResponsiveStyle(cards)}
         </div>
       </div>
     );
@@ -131,17 +139,17 @@ export function V3PlayerStats({ player }: V3PlayerStatsProps) {
 
     return (
       <div className="space-y-4 pt-3 border-t border-[#2A312D]/50">
-        <h3 className="text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]">
+        <h3 className={responsive ? 'text-xs font-mono font-black uppercase tracking-wider text-[#9CA6A0] sm:text-[9px] sm:tracking-[0.2em]' : 'text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           Player Stats
         </h3>
         {hasBatting && (
-          <StatGroup title="Batting">
-            {battingCards}
+          <StatGroup title="Batting" responsive={responsive}>
+            {withResponsiveStyle(battingCards)}
           </StatGroup>
         )}
         {hasBowling && (
-          <StatGroup title="Bowling" accentClass="text-[#34D399]">
-            {bowlingCards}
+          <StatGroup title="Bowling" accentClass="text-[#34D399]" responsive={responsive}>
+            {withResponsiveStyle(bowlingCards)}
           </StatGroup>
         )}
       </div>
@@ -170,17 +178,17 @@ export function V3PlayerStats({ player }: V3PlayerStatsProps) {
 
     return (
       <div className="space-y-4 pt-3 border-t border-[#2A312D]/50">
-        <h3 className="text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]">
+        <h3 className={responsive ? 'text-xs font-mono font-black uppercase tracking-wider text-[#9CA6A0] sm:text-[9px] sm:tracking-[0.2em]' : 'text-[9px] font-mono font-black uppercase tracking-[0.2em] text-[#9CA6A0]'}>
           Player Stats
         </h3>
         {hasBatting && (
-          <StatGroup title="Batting">
-            {battingCards}
+          <StatGroup title="Batting" responsive={responsive}>
+            {withResponsiveStyle(battingCards)}
           </StatGroup>
         )}
         {hasKeeping && (
-          <StatGroup title="Wicketkeeping" accentClass="text-[#60A5FA]">
-            {keepingCards}
+          <StatGroup title="Wicketkeeping" accentClass="text-[#60A5FA]" responsive={responsive}>
+            {withResponsiveStyle(keepingCards)}
           </StatGroup>
         )}
       </div>

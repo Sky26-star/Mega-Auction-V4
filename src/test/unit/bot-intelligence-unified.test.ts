@@ -122,7 +122,7 @@ describe('Unified Bot Intelligence Architecture', () => {
 
       const baseRes = evaluateQAndTV(candidate, future, teamState, 100, false);
       let previousQBuy = Infinity;
-      
+
       // Iterate over the actual ladder up to TV + 2 increments
       for (const b of baseRes.ladderEvaluated) {
         // currentBid is passed. To test Q_buy at bid B, we pass a currentBid such that nextRequiredBid = B.
@@ -308,7 +308,7 @@ describe('Unified Bot Intelligence Architecture', () => {
         personality: 'OPPORTUNISTIC',
         qResult,
         roleNeed: 'NORMAL',
-        remainingTimerMs: 15000, 
+        remainingTimerMs: 15000,
         brainState: { beliefs: { rivalAggression: 0.9, marketInflation: 0.2, roleScarcityPanic: 0.3, estimatedSquadQuality: 0.5 }, memory: {} as any, plan: {} as any },
         remainingSlots: 8,
         purse: 3000
@@ -437,7 +437,7 @@ describe('Unified Bot Intelligence Architecture', () => {
       expect(evidenceLog).toHaveLength(1);
       const ev = evidenceLog[0]!;
       expect(ev.teamId).toBe(bot.id);
-      expect(['ENTER', 'HESITATE', 'DROP']).toContain(ev.decision);
+      expect(['ENTER', 'PASS', 'DROP']).toContain(ev.decision);
       expect(ev.tv).toBeDefined();
       expect(ev.tv).toBeGreaterThanOrEqual(150);
 

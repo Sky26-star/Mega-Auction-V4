@@ -1,5 +1,5 @@
 // src/test/unit/mini-bot-context.test.ts
-// Unit Tests for Phase 16 Stage 1 — Mini Auction Bot Context Correction
+// Unit Tests for Phase 16 Stage 1 â€” Mini Auction Bot Context Correction
 //
 // Proves:
 // A. Mega current roster comes from squad_players
@@ -18,7 +18,10 @@ import { executeAuctionTick } from '@/lib/auction/auction-orchestrator';
 import { evaluateBotsForLot,  } from '@/lib/auction/server-bot-engine';
 import type { V3Team, V3Player } from '@/lib/v3-auction-types';
 
-describe('Phase 16 Stage 1 — Mini Auction Bot Context Correction', () => {
+// Exercise the deferred bot engine explicitly; production human rooms keep it off.
+vi.mock('@/lib/feature-flags', () => ({ AUCTION_BOTS_ENABLED: true }));
+
+describe('Phase 16 Stage 1 â€” Mini Auction Bot Context Correction', () => {
   const auctionId = '11111111-1111-1111-1111-111111111111';
   const roomId = '22222222-2222-2222-2222-222222222222';
   const botTeamId = 'bot-team-1';
@@ -189,11 +192,14 @@ describe('Phase 16 Stage 1 — Mini Auction Bot Context Correction', () => {
     expect(mockSupabase.from).toHaveBeenCalledWith('squad_players');
 
     // Verify the bot bid was triggered
-    expect(mockSupabase.rpc).toHaveBeenCalledWith('v3_place_bid', expect.objectContaining({
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('v3_place_bot_bid', expect.objectContaining({
       p_auction_id: auctionId,
       p_lot_id: currentLotId,
       p_team_id: botTeamId,
-      p_is_bot: true,
+      p_expected_current_bid: 0,
+      p_expected_highest_bidder_team_id: null,
+      p_expected_next_bid_amount: 150,
+      p_maximum_bid: expect.any(Number),
     }));
   });
 
@@ -300,10 +306,13 @@ describe('Phase 16 Stage 1 — Mini Auction Bot Context Correction', () => {
 
     await executeAuctionTick(mockSupabase);
 
-    // Verify v3_place_bid was called without being blocked by false overseas or squad limit
-    expect(mockSupabase.rpc).toHaveBeenCalledWith('v3_place_bid', expect.objectContaining({
+    // Verify the guarded bot RPC was called without being blocked by false overseas or squad limit
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('v3_place_bot_bid', expect.objectContaining({
       p_team_id: botTeamId,
-      p_is_bot: true,
+      p_expected_current_bid: 0,
+      p_expected_highest_bidder_team_id: null,
+      p_expected_next_bid_amount: 150,
+      p_maximum_bid: expect.any(Number),
     }));
   });
 
@@ -359,7 +368,7 @@ describe('Phase 16 Stage 1 — Mini Auction Bot Context Correction', () => {
     // Because bot currently has 0 batsmen, it has high utility for the Batsman
     expect(evidenceArr.length).toBe(1);
     const evidence = evidenceArr[0];
-    
+
     // Prove Q/TV was used (TV must exist and be a number > 150)
     expect(evidence.tv).toBeGreaterThan(150);
     expect(evidence.decision).toBe('ENTER');
@@ -367,7 +376,7 @@ describe('Phase 16 Stage 1 — Mini Auction Bot Context Correction', () => {
     expect(bids.length).toBe(1);
   });
 
-  it('H, I, J: Shared architecture invariants — single Bot Engine, single Bid Engine, no duplicated behaviours', () => {
+  it('H, I, J: Shared architecture invariants â€” single Bot Engine, single Bid Engine, no duplicated behaviours', () => {
     // Proves that evaluateBotsForLot is imported from the single server-bot-engine.ts
     expect(typeof evaluateBotsForLot).toBe('function');
   });

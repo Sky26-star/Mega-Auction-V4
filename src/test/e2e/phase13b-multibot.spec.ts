@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';

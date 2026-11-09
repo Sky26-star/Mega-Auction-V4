@@ -3,17 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/check-port.js && node scripts/start-dev.js",
-    "build": "next build",
+    "dev": "node scripts/check-port.js && node scripts/check-local-services.js && node scripts/start-dev.js",
+    "worker": "tsx scripts/worker.ts",
+    "build": "node scripts/check-production-config.mjs && next build && npm run check:no-diagnostic-route",
+    "check:production": "node scripts/check-production-config.mjs",
     "start": "next start",
     "lint": "next lint",
+    "check:no-diagnostic-route": "node scripts/verify-no-diagnostic-route.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
     "test:e2e": "playwright test"
   },
+  "engines": {
+    "node": "24.x"
+  },
   "dependencies": {
-    "@clerk/nextjs": "^7.9.13",
     "@radix-ui/react-avatar": "^1.1.1",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-dropdown-menu": "^2.1.2",
@@ -37,6 +42,7 @@
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
     "ts-node": "^10.9.2",
+    "tsx": "4.23.15",
     "zod": "^3.23.8",
     "zustand": "^5.0.1"
   },

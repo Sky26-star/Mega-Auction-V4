@@ -312,5 +312,64 @@ Missing Country Player,BATSMAN,C,75`;
       expect(stats[2]).toEqual({ label: 'Wickets', value: 110 });
       expect(stats[6]).toEqual({ label: 'Best Bowling', value: '5/18' });
     });
+
+    it('returns exactly 8 role-specific stats for WICKET_KEEPER', () => {
+      const p: any = {
+        role: 'WICKET_KEEPER',
+        matches: 90,
+        runs: 2800,
+        batting_average: 36.5,
+        strike_rate: 138.2,
+        fifties: 18,
+        highest_score: 95,
+        catches: 75,
+        stumpings: 15,
+      };
+      const stats = getRoleStats(p);
+      expect(stats.length).toBe(8);
+      expect(stats[6]).toEqual({ label: 'Catches', value: 75 });
+      expect(stats[7]).toEqual({ label: 'Stumpings', value: 15 });
+    });
+
+    it('returns exactly 8 role-specific stats for ALL_ROUNDER', () => {
+      const p: any = {
+        role: 'ALL_ROUNDER',
+        matches: 120,
+        runs: 2200,
+        batting_average: 28.4,
+        strike_rate: 145.0,
+        wickets: 85,
+        bowling_average: 26.2,
+        economy_rate: 8.1,
+        best_bowling: '4/22',
+      };
+      const stats = getRoleStats(p);
+      expect(stats.length).toBe(8);
+      expect(stats[4]).toEqual({ label: 'Wickets', value: 85 });
+      expect(stats[7]).toEqual({ label: 'Best Bowling', value: '4/22' });
+    });
+
+    it('replaces null, undefined, NaN, or empty stats with "-" on user-facing cards', () => {
+      const p: any = {
+        role: 'BATSMAN',
+        matches: null,
+        runs: undefined,
+        batting_average: NaN,
+        strike_rate: '',
+        hundreds: 0,
+        fifties: 2,
+        highest_score: null,
+        boundaries: undefined,
+      };
+      const stats = getRoleStats(p);
+      expect(stats[0]).toEqual({ label: 'Matches', value: '-' });
+      expect(stats[1]).toEqual({ label: 'Runs', value: '-' });
+      expect(stats[2]).toEqual({ label: 'Average', value: '-' });
+      expect(stats[3]).toEqual({ label: 'Strike Rate', value: '-' });
+      expect(stats[4]).toEqual({ label: '100s', value: 0 }); // 0 is genuine numeric zero
+      expect(stats[5]).toEqual({ label: '50s', value: 2 });
+      expect(stats[6]).toEqual({ label: 'Highest Score', value: '-' });
+      expect(stats[7]).toEqual({ label: 'Boundaries', value: '-' });
+    });
   });
 });

@@ -1,0 +1,29 @@
+# Never upload local credentials or machine-specific environment files.
+.env*
+!.env.example
+
+# Keep database backups, schema snapshots, and rollback artifacts out of builds.
+supabase-db-volume-backup-*.tar
+remote-public-schema*.sql
+remote-public-schema-summary.txt
+supabase/local-db-rollback/
+*.dump
+*.backup
+*.bak
+
+# Local build caches, recovery copies, and browser-test output.
+.next/
+.next-recovery*/
+node-compile-cache/
+playwright-report/
+test-results/
+coverage/
+
+# Local repository metadata and stray generated file.
+.git/
+scratch/
+src/test/
+/docs/
+/supabase/
+node_modules/
+{{.Destination}}

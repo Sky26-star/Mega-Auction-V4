@@ -1,27 +1,12 @@
-
-import { ClerkProvider } from '@clerk/nextjs';
 import type { Metadata } from 'next';
-import ClerkSupabaseTokenBridge from '@/components/providers/clerk-supabase-token-bridge';
+import { AuthProvider } from '@/components/providers/auth-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI Based Career Guidance and Job Finder Website',
-  description: 'AI based career guidance and job finder website',
+  title: 'Mega Auction Arena',
+  description: 'Live cricket auctions, franchise squads, and auction insights.',
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <ClerkProvider>
-      <html lang="en" className="dark">
-        <body>
-          <ClerkSupabaseTokenBridge />
-          {children}
-        </body>
-      </html>
-    </ClerkProvider>
-  );
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <html lang="en" className="dark"><body><AuthProvider>{children}</AuthProvider></body></html>;
 }

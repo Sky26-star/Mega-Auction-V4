@@ -1,3 +1,4 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import { createDisposableTestUser, cleanupDisposableAuction, cleanupBoundedTestPlayerSet } from './setup/auction-fixture';
 import crypto from 'crypto';

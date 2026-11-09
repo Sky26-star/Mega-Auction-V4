@@ -1,25 +1,25 @@
 // src/lib/admin/auth.ts
 // Server-Side Platform Admin Authorization Security Layer
 
-import { auth } from '@clerk/nextjs/server';
-import { createClient as createServerClient } from '@/lib/supabase/server';
-import { type Profile } from '@/lib/types/auth';
+import { auth } from '@/lib/auth/server-session';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { type AdminProfile } from '@/lib/types/auth';
 
 export interface AdminAuthResult {
   authorized: boolean;
   userId: string | null;
-  profile: Profile | null;
+  profile: AdminProfile | null;
   error: string | null;
 }
 
 /**
  * Server-side authoritative verification of Platform Admin privileges.
- * Queries auth session and profiles.is_admin directly from database.
+ * Resolves the Supabase Auth identity and reads profiles.is_admin only through the
+ * server-only service client. Never trusts client-side profile state.
  * Never trusts client-side state flags.
  */
 export async function verifyAdminUser(): Promise<AdminAuthResult> {
   try {
-    const supabase = await createServerClient();
     const { userId } = await auth();
     if (!userId) {
       return {
@@ -30,9 +30,10 @@ export async function verifyAdminUser(): Promise<AdminAuthResult> {
       };
     }
 
+    const supabase = createAdminClient();
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, username, display_name, avatar_url, is_admin, created_at, updated_at')
       .eq('id', userId)
       .maybeSingle();
 
@@ -49,7 +50,7 @@ export async function verifyAdminUser(): Promise<AdminAuthResult> {
       return {
         authorized: false,
         userId: userId,
-        profile: profile as Profile,
+        profile: profile as AdminProfile,
         error: 'FORBIDDEN: You do not have Platform Administrator privileges.',
       };
     }
@@ -57,7 +58,7 @@ export async function verifyAdminUser(): Promise<AdminAuthResult> {
     return {
       authorized: true,
       userId: userId,
-      profile: profile as Profile,
+      profile: profile as AdminProfile,
       error: null,
     };
   } catch (err: any) {

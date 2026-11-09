@@ -27,3 +27,10 @@ export function formatLakhsToCr(lakhs: number | undefined | null): string {
   if (typeof lakhs !== 'number' || isNaN(lakhs)) return '0.00';
   return (lakhs / 100).toFixed(2);
 }
+
+export function normalizeToLakhsSafe(amount: number): number {
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (amount >= 100000) return amount / 100000; // Raw Rupees -> Lakhs
+  if (amount < 25) return amount * 100;         // Crores -> Lakhs
+  return amount;                                // Already in Lakhs
+}

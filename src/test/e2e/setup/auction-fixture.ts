@@ -1,14 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import './e2e-target-guard';
 
-// The fixture requires Supabase Anon Key and URL. 
-// For local tests, we default to standard local Supabase ports.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseAnonKey) {
-  throw new Error('Supabase Anon Key is required. Please set NEXT_PUBLIC_SUPABASE_ANON_KEY. If running locally, check your .env.local file.');
-}
+const supabaseUrl = process.env.SUPABASE_TEST_URL!;
+const supabaseAnonKey = process.env.SUPABASE_TEST_ANON_KEY!;
 
 /**
  * Creates a standard authenticated Supabase client for a disposable test user.
@@ -404,18 +399,20 @@ export async function setupDisposableAuction(
     playerSetId?: string;
     roomSettings?: Record<string, any>;
     defaultPurse?: number;
+    botCount?: number;
   }
 ) {
   // 6 char code
   const roomCode = `T${runId.substring(0, 5).toUpperCase()}`;
   
+  const botCount = options?.botCount ?? 3;
   const roomSettings = {
     timer_duration_seconds: 15,
     min_bid_increment: 50,
     default_purse: options?.roomSettings?.default_purse ?? 10000,
     max_squad_size: options?.roomSettings?.max_squad_size ?? 15,
     max_overseas: options?.roomSettings?.max_overseas ?? 8,
-    bot_count: 3,
+    bot_count: botCount,
     bot_difficulty: 'Balanced',
     // Merge any additional settings
     ...(options?.roomSettings || {}),
@@ -452,16 +449,18 @@ export async function setupDisposableAuction(
     { id: 'bot-3', name: 'Bot Bangalore', shortName: 'BB', color: '#FF0000', managerName: 'AI Bangalore' },
   ];
 
-  const { error: botError } = await supabase.rpc('provision_room_bots', {
-    p_room_id: room_id,
-    p_bots: botsPayload,
-  });
+  if (botCount > 0) {
+    const { error: botError } = await supabase.rpc('provision_room_bots', {
+      p_room_id: room_id,
+      p_bots: botsPayload.slice(0, botCount),
+    });
 
-  if (botError) {
-    // Partial setup failure: Room was created, but bots failed.
-    // Clean up the room so it doesn't leak.
-    await supabase.rpc('delete_room', { p_room_id: room_id });
-    throw new Error(`Failed to provision bots: ${botError.message} (Room ${room_id} was cleaned up)`);
+    if (botError) {
+      // Partial setup failure: Room was created, but bots failed.
+      // Clean up the room so it doesn't leak.
+      await supabase.rpc('delete_room', { p_room_id: room_id });
+      throw new Error(`Failed to provision bots: ${botError.message} (Room ${room_id} was cleaned up)`);
+    }
   }
 
   return {

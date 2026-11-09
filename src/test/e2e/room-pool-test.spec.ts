@@ -1,7 +1,6 @@
+import './setup/e2e-target-guard';
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -114,7 +113,8 @@ test.describe('Room Scoped Player Pool Smoke Test', () => {
     await page.fill('#room-name', 'Smoke Test B - All');
     
     // Select the default dataset
-    await page.selectOption('#player-set-select', 'DEFAULT');
+    await page.getByRole('combobox', { name: 'Select Auction Player Set' }).click();
+    await page.getByRole('option', { name: /Official IPL 2026 Dataset/ }).click();
     
     // Make sure FULL SET is selected (it is by default)
     await page.click('button:has-text("FULL SET")');

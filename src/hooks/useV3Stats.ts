@@ -49,40 +49,37 @@ export function useV3Stats(auctionId: string | null) {
       setLoading(true);
       setError(null);
 
-      // 1. Fetch lots (SOLD and UNSOLD)
-      const { data: lotsData, error: lotsError } = await supabase
+      // These reads are independent: avoid three sequential database round trips.
+      const [lotsResult, teamsResult, bidsResult] = await Promise.all([
+        supabase
         .from('auction_lots')
         .select(`
           id,
           status,
           winning_bid,
           winning_team_id,
-          player:players(*)
+          player:players(id, name, role, country, is_overseas)
         `)
         .eq('auction_id', auctionId)
-        .in('status', ['SOLD', 'UNSOLD']);
-
-      if (seq !== fetchSeqRef.current) return;
-      if (lotsError) throw lotsError;
-
-      // 2. Fetch teams
-      const { data: teamsData, error: teamsError } = await supabase
+        .in('status', ['SOLD', 'UNSOLD']),
+        supabase
         .from('teams')
-        .select('*')
-        .eq('auction_id', auctionId);
-
-      if (seq !== fetchSeqRef.current) return;
-      if (teamsError) throw teamsError;
-
-      // 3. Fetch valid bids
-      const { data: bidsData, error: bidsError } = await supabase
+        .select('id, name, short_name, purse, initial_purse, players_bought, overseas_count, is_bot')
+        .eq('auction_id', auctionId),
+        supabase
         .from('bids')
         .select('lot_id, amount, created_at')
         .eq('auction_id', auctionId)
         .eq('is_valid', true)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true }),
+      ]);
 
       if (seq !== fetchSeqRef.current) return;
+      const { data: lotsData, error: lotsError } = lotsResult;
+      const { data: teamsData, error: teamsError } = teamsResult;
+      const { data: bidsData, error: bidsError } = bidsResult;
+      if (lotsError) throw lotsError;
+      if (teamsError) throw teamsError;
       if (bidsError) throw bidsError;
 
       if (!mountedRef.current) return;

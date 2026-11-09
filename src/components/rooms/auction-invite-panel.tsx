@@ -2,7 +2,7 @@
 
 // src/components/rooms/auction-invite-panel.tsx
 import React, { useState } from 'react';
-import { Copy, CheckCircle, Share2 } from 'lucide-react';
+import { Copy, CheckCircle, Share2, AlertCircle } from 'lucide-react';
 
 export interface AuctionInvitePanelProps {
   roomCode: string;
@@ -11,24 +11,65 @@ export interface AuctionInvitePanelProps {
 export function AuctionInvitePanel({ roomCode }: AuctionInvitePanelProps) {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleCopyCode = () => {
-    if (!roomCode) return;
-    navigator.clipboard.writeText(roomCode);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    if (!text) return false;
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (err) {
+        console.warn('navigator.clipboard.writeText failed, using fallback:', err);
+      }
+    }
+
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return successful;
+    } catch (err) {
+      console.error('Fallback clipboard copy failed:', err);
+      return false;
+    }
   };
 
-  const handleCopyLink = () => {
-    if (typeof window === 'undefined') return;
-    const inviteUrl = `${window.location.origin}/rooms/join?code=${roomCode}`;
-    navigator.clipboard.writeText(inviteUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const handleCopyCode = async () => {
+    if (!roomCode) return;
+    setError(null);
+    const success = await copyToClipboard(roomCode.toUpperCase());
+    if (success) {
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    } else {
+      setError('Clipboard copy failed. Please copy manually.');
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (typeof window === 'undefined' || !roomCode) return;
+    setError(null);
+    const inviteUrl = `${window.location.origin}/rooms/join?code=${roomCode.toUpperCase()}`;
+    const success = await copyToClipboard(inviteUrl);
+    if (success) {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } else {
+      setError('Clipboard copy failed. Please copy manually.');
+    }
   };
 
   return (
-    <div className="w-full rounded-2xl bg-[#141917] border-2 border-[#2A312D] p-4 shadow-xl space-y-3">
+    <div className="w-full rounded-2xl bg-[#141917] border-2 border-[#2A312D] p-4 shadow-xl space-y-3 font-sans">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[#2A312D] pb-2.5">
         <h3 className="text-xs font-black text-[#F3F4F1] uppercase font-display tracking-wider flex items-center gap-2">
@@ -41,21 +82,35 @@ export function AuctionInvitePanel({ roomCode }: AuctionInvitePanelProps) {
         </span>
       </div>
 
+      {error && (
+        <div role="alert" className="p-2 rounded-lg bg-[#8F2724]/20 border border-[#B8322E]/60 flex items-center space-x-2 text-[#F3F4F1] text-[11px]">
+          <AlertCircle className="w-3.5 h-3.5 text-[#B8322E] flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
       {/* Room Code Display Box */}
       <div className="p-3 rounded-xl bg-[#0B0F0D] border border-[#2A312D] flex items-center justify-between">
         <div>
           <span className="block text-[9px] font-mono-numbers font-bold text-[#9CA6A0] uppercase tracking-widest mb-0.5">
             ROOM LOBBY CODE
           </span>
-          <code className="text-xl font-mono-numbers font-black text-[#E4B93F] tracking-widest">
-            {roomCode}
-          </code>
+          {roomCode ? (
+            <code className="text-xl font-mono-numbers font-black text-[#E4B93F] tracking-widest">
+              {roomCode}
+            </code>
+          ) : (
+            <span className="text-xs font-mono font-bold text-[#9CA6A0]">
+              UNAVAILABLE
+            </span>
+          )}
         </div>
 
         <button
           type="button"
           onClick={handleCopyCode}
-          className="px-3 py-1.5 rounded-lg bg-[#181E1A] hover:bg-[#222A25] border border-[#2A312D] text-[#E4B93F] text-xs font-mono-numbers font-bold flex items-center space-x-1.5 transition-colors"
+          disabled={!roomCode}
+          className="px-3 py-1.5 rounded-lg bg-[#181E1A] hover:bg-[#222A25] border border-[#2A312D] text-[#E4B93F] text-xs font-mono-numbers font-bold flex items-center space-x-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="Copy Room Code"
         >
           {copiedCode ? (
@@ -76,7 +131,8 @@ export function AuctionInvitePanel({ roomCode }: AuctionInvitePanelProps) {
       <button
         type="button"
         onClick={handleCopyLink}
-        className="w-full py-2 rounded-xl bg-[#0B0F0D] hover:bg-[#181E1A] border border-[#2A312D] text-[#F3F4F1] hover:border-[#C9A227]/40 text-xs font-mono-numbers font-bold flex items-center justify-center space-x-2 transition-all"
+        disabled={!roomCode}
+        className="w-full py-2 rounded-xl bg-[#0B0F0D] hover:bg-[#181E1A] border border-[#2A312D] text-[#F3F4F1] hover:border-[#C9A227]/40 text-xs font-mono-numbers font-bold flex items-center justify-center space-x-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {copiedLink ? (
           <>

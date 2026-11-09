@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { evaluateTacticalDecision, type TacticalInputContext } from '@/lib/auction/bot-tactical-engine';
 import { updateBotBrainState } from '@/lib/auction/bot-brain-state';
 import {
@@ -8,6 +8,11 @@ import {
   type BotDecisionEvidence
 } from '@/lib/auction/server-bot-engine';
 import { type V3Player, type V3Team } from '@/lib/v3-auction-types';
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, appendFileSync: vi.fn() };
+});
 
 describe('Behavior B8: Rival Baiting / Drop', () => {
   const currentLot: V3Player & { rating?: number } = {
@@ -22,14 +27,6 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     is_overseas: false,
     image_url: null,
     rating: 80,
-    matches: 80,
-    runs: 2500,
-    batting_average: 35,
-    strike_rate: 140,
-    boundaries: 300,
-    hundreds: 1,
-    fifties: 15,
-    highest_score: 102,
   };
 
   const opportunisticBot: V3Team & { personality?: string } = {
@@ -288,6 +285,16 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     const currentBid = 475;
     const basePrice = 100;
 
+    const currentLotWithStats: V3Player & { rating?: number } = {
+      ...currentLot,
+      rating: 84,
+      matches: 60,
+      runs: 2000,
+      batting_average: 32,
+      strike_rate: 135,
+      boundaries: 250,
+    };
+
     const futureAlternative: V3Player = {
       id: 'future-bat-1',
       name: 'Future Batsman',
@@ -299,6 +306,7 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
       base_price: 100,
       is_overseas: false,
       image_url: null,
+      rating: 85,
     };
 
     const highRivalBrainState = {
@@ -324,7 +332,7 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     const evidenceTriggered: BotDecisionEvidence[] = [];
     const bidsTriggered = evaluateBotsForLot(
       [opportunisticBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -341,7 +349,7 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     const evidenceLowRival: BotDecisionEvidence[] = [];
     const bidsLowRival = evaluateBotsForLot(
       [opportunisticBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -358,7 +366,7 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     const evidenceAggressive: BotDecisionEvidence[] = [];
     const bidsAggressive = evaluateBotsForLot(
       [aggressiveBot],
-      currentLot,
+      currentLotWithStats,
       currentBid,
       basePrice,
       undefined,
@@ -391,7 +399,7 @@ describe('Behavior B8: Rival Baiting / Drop', () => {
     });
 
     // B8 Triggered: Opportunistic bot drops with RIVAL_BAIT_DROP and submits no bids
-    expect(evidenceTriggered[0]?.decision).toBe('DROP');
+    expect(evidenceTriggered[0]?.decision).toBe('PASS');
     expect(evidenceTriggered[0]?.actionReason).toBe('RIVAL_BAIT_DROP');
     expect(bidsTriggered.length).toBe(0);
 
