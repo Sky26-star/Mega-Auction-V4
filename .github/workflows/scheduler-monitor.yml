@@ -13,6 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     env:
       DATABASE_URL: ${{ secrets.SCHEDULER_MONITOR_DATABASE_URL }}
       PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
@@ -20,49 +21,95 @@ jobs:
 
     steps:
       - name: Install PostgreSQL client
-        run: npm install --prefix "$RUNNER_TEMP/monitor" --no-audit --no-fund --ignore-scripts pg@8.23.0
+        run: |
+          npm install \
+            --prefix "$RUNNER_TEMP/monitor" \
+            --no-audit \
+            --no-fund \
+            --ignore-scripts \
+            pg@8.23.0
 
       - name: Check scheduler health and report
         shell: bash
         run: |
           node <<'JS'
-          const { Client } = require(process.env.RUNNER_TEMP + '/monitor/node_modules/pg');
+          const { Client } = require(
+            process.env.RUNNER_TEMP + '/monitor/node_modules/pg'
+          );
 
           (async () => {
             let healthy = false;
-            let client;
+            let client = null;
+            let stage = 'CONFIGURATION';
 
             try {
-              const db = new URL(process.env.DATABASE_URL);
-              if (!['postgres:', 'postgresql:'].includes(db.protocol) || db.search || db.hash) {
-                throw Error('INVALID_DB_URL');
+              if (!process.env.DATABASE_URL) {
+                throw new Error('DATABASE_SECRET_MISSING');
               }
+
+              stage = 'DATABASE_URL';
+
+              const db = new URL(process.env.DATABASE_URL);
+
+              if (
+                !['postgres:', 'postgresql:'].includes(db.protocol) ||
+                db.search ||
+                db.hash
+              ) {
+                throw new Error('INVALID_DB_URL');
+              }
+
+              stage = 'DATABASE_CONNECTION';
 
               client = new Client({
                 connectionString: process.env.DATABASE_URL,
-                ssl: { rejectUnauthorized: true },
+                ssl: {
+                  rejectUnauthorized: true
+                },
                 connectionTimeoutMillis: 5000,
                 query_timeout: 5000
               });
 
               await client.connect();
 
+              stage = 'LOGIN_SECURITY';
+
               const role = await client.query(
-                "SELECT rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole AS elevated FROM pg_roles WHERE rolname = session_user"
+                `SELECT
+                   rolsuper OR
+                   rolbypassrls OR
+                   rolcreatedb OR
+                   rolcreaterole AS elevated
+                 FROM pg_roles
+                 WHERE rolname = session_user`
               );
+
               if (role.rows[0]?.elevated !== false) {
-                throw Error('UNSAFE_LOGIN');
+                throw new Error('UNSAFE_LOGIN');
               }
 
-              await client.query('SET ROLE auction_monitor');
-              await client.query('SET default_transaction_read_only = on');
+              stage = 'MONITOR_ROLE';
+
+              await client.query(
+                'SET ROLE auction_monitor'
+              );
+
+              await client.query(
+                'SET default_transaction_read_only = on'
+              );
+
+              stage = 'HEALTH_QUERY';
 
               const result = await client.query(
                 'SELECT public.auction_scheduler_health() AS health'
               );
 
               const h = result.rows[0]?.health;
-              const expected = process.env.EXPECT_ENABLED === 'true';
+
+              const expected =
+                process.env.EXPECT_ENABLED === 'true';
+
+              stage = 'HEALTH_VALIDATION';
 
               healthy =
                 h?.schemaVersion === 1 &&
@@ -74,22 +121,74 @@ jobs:
                 h.quarantinedActions === 0 &&
                 h.undeliveredAlerts === 0;
 
-              console.log(healthy ? 'Health check PASS' : 'Health check FAILED');
-            } catch {
-              console.error('Database health check failed');
-            } finally {
-              if (client) await client.end().catch(() => {});
-            }
+              console.log(
+                healthy
+                  ? 'Scheduler health check PASS'
+                  : 'Scheduler health check FAILED'
+              );
 
-            try {
-              const ping = new URL(process.env.PING_URL);
-              if (ping.protocol !== 'https:' ||
-                  ping.hostname !== 'hc-ping.com' ||
-                  ping.username || ping.password || ping.search || ping.hash) {
-                throw Error('INVALID_PING_URL');
+              if (!healthy) {
+                console.error(
+                  'Health response does not match expected safe state'
+                );
               }
 
-              const url = ping.toString().replace(/\/$/, '') +
+            } catch (err) {
+
+              const knownMessages = [
+                'DATABASE_SECRET_MISSING',
+                'INVALID_DB_URL',
+                'UNSAFE_LOGIN'
+              ];
+
+              let reason = 'UNKNOWN';
+
+              if (knownMessages.includes(err?.message)) {
+                reason = err.message;
+              } else if (
+                typeof err?.code === 'string' &&
+                /^[A-Z0-9_]{3,40}$/.test(err.code)
+              ) {
+                reason = err.code;
+              } else if (
+                typeof err?.name === 'string' &&
+                /^[A-Za-z]+Error$/.test(err.name)
+              ) {
+                reason = err.name;
+              }
+
+              console.error(
+                `Database health check failed at ${stage}: ${reason}`
+              );
+
+            } finally {
+              if (client) {
+                await client.end().catch(() => {});
+              }
+            }
+
+            stage = 'HEALTHCHECKS_NOTIFICATION';
+
+            try {
+              if (!process.env.PING_URL) {
+                throw new Error('PING_SECRET_MISSING');
+              }
+
+              const ping = new URL(process.env.PING_URL);
+
+              if (
+                ping.protocol !== 'https:' ||
+                ping.hostname !== 'hc-ping.com' ||
+                ping.username ||
+                ping.password ||
+                ping.search ||
+                ping.hash
+              ) {
+                throw new Error('INVALID_PING_URL');
+              }
+
+              const url =
+                ping.toString().replace(/\/$/, '') +
                 (healthy ? '' : '/fail');
 
               const response = await fetch(url, {
@@ -98,14 +197,40 @@ jobs:
                 signal: AbortSignal.timeout(8000)
               });
 
-              if (!response.ok) throw Error('PING_FAILED');
-            } catch {
-              console.error('Healthchecks notification failed');
+              if (!response.ok) {
+                throw new Error('PING_FAILED');
+              }
+
+              console.log(
+                healthy
+                  ? 'Healthchecks success ping sent'
+                  : 'Healthchecks failure signal sent'
+              );
+
+            } catch (err) {
+              const knownMessages = [
+                'PING_SECRET_MISSING',
+                'INVALID_PING_URL',
+                'PING_FAILED'
+              ];
+
+              const reason = knownMessages.includes(err?.message)
+                ? err.message
+                : 'NOTIFICATION_UNAVAILABLE';
+
+              console.error(
+                `Healthchecks notification failed: ${reason}`
+              );
+
               process.exitCode = 1;
             }
 
-            if (!healthy) process.exitCode = 1;
+            if (!healthy) {
+              process.exitCode = 1;
+            }
+
           })().catch(() => {
+            console.error('Unexpected monitoring failure');
             process.exitCode = 1;
           });
           JS
